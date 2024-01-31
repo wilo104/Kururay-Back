@@ -32,7 +32,7 @@ app.post('/login', async (req, res) => {
     }
 
     // Realizar la autenticación en la base de datos
-    const userQuery = await pool.query('SELECT dni, password, role FROM usuarios WHERE dni = $1', [dni]);
+    const userQuery = await pool.query('SELECT dni, password, tipo_usuario FROM usuarios WHERE dni = $1', [dni]);
 
     if (userQuery.rows.length === 0) {
       return res.status(401).json({ message: 'Usuario o contraseña incorrectos' });
@@ -48,12 +48,26 @@ app.post('/login', async (req, res) => {
     const secretKey = process.env.JWT_SECRET_KEY || 'tu_secreto_secreto';
     const token = jwt.sign({ dni: userQuery.rows[0].dni, role: userQuery.rows[0].role }, secretKey);
 
-    res.json({ token });
+    //Incluir el rol en la respuesta 
+    const tipo_usuario = userQuery.rows[0].tipo_usuario;
+
+    res.json({ token, tipo_usuario:tipo_usuario });
   } catch (error) {
     console.error('Error en la autenticación:', error);
     res.status(500).json({ message: 'Error en el servidor durante la autenticación' });
   }
 });
+app.get('/usuarios', async (req, res) => {
+  try {
+      const result = await pool.query('SELECT * FROM usuarios');
+      res.json(result.rows);
+  } catch (error) {
+      console.error('Error al obtener usuarios:', error);
+      res.status(500).json({ message: 'Error en el servidor al obtener usuarios' });
+  }
+});
+
+
 
 // Otros endpoints para obtener información según el rol, etc.
 
