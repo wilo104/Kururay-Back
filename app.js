@@ -67,7 +67,8 @@ app.post('/login', async (req, res) => {
     }
 
     // Realizar la autenticación en la base de datos
-    const userQuery = await pool.query('SELECT dni, password, tipo_usuario, estado_usuario FROM usuarios WHERE dni = $1', [dni]);
+    // Asegúrate de incluir `id` en la selección de tu consulta SQL
+    const userQuery = await pool.query('SELECT id, dni, password, tipo_usuario, estado_usuario FROM usuarios WHERE dni = $1', [dni]);
 
     if (userQuery.rows.length === 0) {
       return res.status(401).json({ message: 'Usuario o contraseña incorrectos' });
@@ -89,10 +90,11 @@ app.post('/login', async (req, res) => {
     const secretKey = process.env.JWT_SECRET_KEY || 'tu_secreto_secreto';
     const token = jwt.sign({ dni: userQuery.rows[0].dni, role: userQuery.rows[0].role }, secretKey);
 
-    // Incluir el rol en la respuesta 
+    // Incluir el rol y el ID en la respuesta
     const tipo_usuario = userQuery.rows[0].tipo_usuario;
+    const id = userQuery.rows[0].id; // Obtener el ID del usuario de la consulta
 
-    res.json({ token, tipo_usuario });
+    res.json({ token, tipo_usuario, id }); // Incluir el ID en la respuesta JSON
   } catch (error) {
     console.error('Error en la autenticación:', error);
     res.status(500).json({ message: 'Error en el servidor durante la autenticación' });
@@ -106,6 +108,26 @@ app.get('/usuarios', async (req, res) => {
   } catch (error) {
       console.error('Error al obtener usuarios:', error);
       res.status(500).json({ message: 'Error en el servidor al obtener usuarios' });
+  }
+});
+// Endpoint para obtener un usuario específico por ID
+app.get('/usuarios/:id', async (req, res) => {
+  const { id } = req.params; // Extrae el ID del parámetro de ruta
+
+  try {
+    // Realiza una consulta a la base de datos para obtener el usuario por su ID
+    const result = await pool.query('SELECT * FROM usuarios WHERE id = $1', [id]);
+
+    if (result.rows.length === 0) {
+      // Si no se encuentra el usuario, devuelve un error 404
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+
+    // Si el usuario se encuentra, devuelve el usuario como respuesta JSON
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al obtener el usuario por ID:', error);
+    res.status(500).json({ message: 'Error en el servidor al obtener el usuario' });
   }
 });
 
@@ -230,7 +252,7 @@ app.put('/usuarios/:id/estado', async (req, res) => {
     // Actualizar el estado del usuario
     await pool.query('UPDATE usuarios SET estado_usuario = $1 WHERE id = $2', [estadoUsuario, userId]);
 
-    // Enviar respuesta exitosa
+    // Enviar respuesta exitosae
     res.json({ message: `El usuario ha sido marcado como "${nuevoEstado}"` });
   } catch (error) {
     console.error('Error al cambiar el estado del usuario:', error);
@@ -265,6 +287,40 @@ app.put('/usuarios/:id', async (req, res) => {
   }
 });
 
+app.put('/usuarios/:id/cambiar-contrasena', async (req, res) => {
+  const userId = req.params.id;
+  const { contrasenaActual, nuevaContrasena } = req.body;
+
+  try {
+    // Verificar si el usuario existe
+    const userQuery = await pool.query('SELECT * FROM usuarios WHERE id = $1', [userId]);
+    const usuario = userQuery.rows[0];
+
+    if (!usuario) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+
+    // Verificar la contraseña actual
+    const contrasenaValida = await bcrypt.compare(contrasenaActual, usuario.password);
+    if (!contrasenaValida) {
+      return res.status(401).json({ message: 'Contraseña actual incorrecta' });
+    }
+
+    // Hashear la nueva contraseña
+    const nuevaContrasenaHash = await bcrypt.hash(nuevaContrasena, 10);
+
+    // Actualizar la contraseña en la base de datos
+    await pool.query(
+      'UPDATE usuarios SET password = $1 WHERE id = $2',
+      [nuevaContrasenaHash, userId]
+    );
+
+    res.json({ message: 'Contraseña actualizada correctamente' });
+  } catch (error) {
+    console.error('Error al actualizar la contraseña:', error);
+    res.status(500).json({ message: 'Error al actualizar la contraseña' });
+  }
+});
 
 
 // Otros endpoints para obtener información según el rol, etc.
