@@ -5,8 +5,11 @@ const bcrypt = require('bcrypt');
 const { Pool } = require('pg');
 const cors = require('cors'); // Importa el middleware cors
 
+const path = require('path');
 const app = express();
 const port = 3000;
+
+
 
 app.use(bodyParser.json());
 
@@ -21,42 +24,7 @@ const pool = new Pool({
     port: 5432,
 });
 
-// Endpoint para el inicio de sesión
-// app.post('/login', async (req, res) => {
-//   const { dni, password } = req.body;
 
-//   try {
-//     // Validar entrada
-//     if (!dni || !password) {
-//       return res.status(400).json({ message: 'Por favor, ingrese DNI y contraseña' });
-//     }
-
-//     // Realizar la autenticación en la base de datos
-//     const userQuery = await pool.query('SELECT dni, password, tipo_usuario FROM usuarios WHERE dni = $1', [dni]);
-
-//     if (userQuery.rows.length === 0) {
-//       return res.status(401).json({ message: 'Usuario o contraseña incorrectos' });
-//     }
-
-//     const storedPasswordHash = userQuery.rows[0].password;
-
-//     if (!(await bcrypt.compare(password, storedPasswordHash))) {
-//       return res.status(401).json({ message: 'Usuario o contraseña incorrectos' });
-//     }
-
-//     // Generar el token JWT con un secreto seguro
-//     const secretKey = process.env.JWT_SECRET_KEY || 'tu_secreto_secreto';
-//     const token = jwt.sign({ dni: userQuery.rows[0].dni, role: userQuery.rows[0].role }, secretKey);
-
-//     //Incluir el rol en la respuesta 
-//     const tipo_usuario = userQuery.rows[0].tipo_usuario;
-
-//     res.json({ token, tipo_usuario:tipo_usuario });
-//   } catch (error) {
-//     console.error('Error en la autenticación:', error);
-//     res.status(500).json({ message: 'Error en el servidor durante la autenticación' });
-//   }
-// });
 app.post('/login', async (req, res) => {
   const { dni, password } = req.body;
 
@@ -85,7 +53,8 @@ app.post('/login', async (req, res) => {
     if (estadoUsuario === false) {
       return res.status(403).json({ message: 'Su cuenta se encuentra en estado de baja. Por favor, contacte al administrador.' });
     }
-
+    const clave_dni = password === userQuery.rows[0].dni; // Esta línea reemplaza tu implementación de clave_dni
+ 
     // Generar el token JWT con un secreto seguro
     const secretKey = process.env.JWT_SECRET_KEY || 'tu_secreto_secreto';
     const token = jwt.sign({ dni: userQuery.rows[0].dni, role: userQuery.rows[0].role }, secretKey);
@@ -94,23 +63,96 @@ app.post('/login', async (req, res) => {
     const tipo_usuario = userQuery.rows[0].tipo_usuario;
     const id = userQuery.rows[0].id; // Obtener el ID del usuario de la consulta
 
-    res.json({ token, tipo_usuario, id }); // Incluir el ID en la respuesta JSON
+    res.json({ token, tipo_usuario, id, clave_dni }); // Incluir el ID en la respuesta JSON
   } catch (error) {
     console.error('Error en la autenticación:', error);
     res.status(500).json({ message: 'Error en el servidor durante la autenticación' });
   }
 });
 
+
+
 app.get('/usuarios', async (req, res) => {
+  // Lista blanca de columnas y direcciones permitidas
+  const columnasPermitidas = ['id', 'nombre', 'apellido_paterno', 'correo', 'telefono'];
+  const direccionPermitida = ['ASC', 'DESC'];
+
+  // Obtener parámetros de consulta
+  let { ordenPor, direccion } = req.query;
+
+  // Validar columna (por defecto: 'id')
+  ordenPor = columnasPermitidas.includes(ordenPor) ? ordenPor : 'id';
+
+  // Validar dirección (por defecto: 'ASC')
+  if (typeof direccion === 'string') {
+    direccion = direccion.toUpperCase(); // Convertir a mayúsculas si existe
+    direccion = direccionPermitida.includes(direccion) ? direccion : 'ASC';
+  } else {
+    direccion = 'ASC'; // Asignar valor predeterminado
+  }
+
   try {
-      const result = await pool.query('SELECT * FROM usuarios');
-      res.json(result.rows);
+    // Realizar consulta a la base de datos
+    const query = `SELECT * FROM usuarios ORDER BY ${ordenPor} ${direccion}`;
+    const result = await pool.query(query);
+
+    // Responder con los resultados
+    res.json(result.rows);
   } catch (error) {
-      console.error('Error al obtener usuarios:', error);
-      res.status(500).json({ message: 'Error en el servidor al obtener usuarios' });
+    console.error('Error al obtener usuarios:', error.message);
+    res.status(500).json({
+      message: 'Error en el servidor al obtener usuarios',
+      error: error.message, // Información extra (opcional)
+    });
   }
 });
+
+
+// app.get('/usuarios/:id/cv', async (req, res) => {
+//   const userId = req.params.id;
+
+//   try {
+//     // Buscar el usuario en la base de datos
+//     const userQuery = await pool.query('SELECT * FROM usuarios WHERE id = $1', [userId]);
+//     const usuario = userQuery.rows[0];
+
+//     if (!usuario) {
+//       return res.status(404).json({ message: 'Usuario no encontrado' });
+//     }
+
+//     // Verificar si el usuario tiene un CV
+//     if (!usuario.cv) {
+//       return res.status(404).json({ message: 'CV no encontrado para este usuario' });
+//     }
+//     console.log('Ruta del archivo CV:', usuario.cv);
+//     // Leer el archivo CV desde la ubicación donde multer lo almacenó
+//     const cvContent = await readFileAsync(usuario.cv);
+ 
+//     // Devolver el contenido del CV como respuesta
+//     res.setHeader('Content-Type', 'application/pdf'); // Por ejemplo, si el CV es un PDF
+//     res.send(cvContent);
+//   } catch (error) {
+//     console.error('Error al obtener el CV del usuario:', error);
+//     res.status(500).json({ message: 'Error al obtener el CV del usuario', error: error.message });
+//   }
+// });
 // Endpoint para obtener un usuario específico por ID
+app.get('/usuarios/:id/cv', async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    // Obtener el contenido del archivo CV como un búfer de bytes desde la base de datos
+    const userQuery = await pool.query('SELECT cv FROM usuarios WHERE id = $1', [userId]);
+    const cvFileBuffer = userQuery.rows[0].cv;
+
+    // Devolver el contenido del CV como respuesta
+    res.setHeader('Content-Type', 'application/pdf');
+    res.send(cvFileBuffer);
+  } catch (error) {
+    console.error('Error al obtener el CV del usuario:', error);
+    res.status(500).json({ message: 'Error al obtener el CV del usuario' });
+  }
+});
 app.get('/usuarios/:id', async (req, res) => {
   const { id } = req.params; // Extrae el ID del parámetro de ruta
 
@@ -171,29 +213,170 @@ app.get('/usuarios/registro', (req, res) => {
 // });
 
 
-app.post('/usuarios/registro', async (req, res) => {
-  const { dni, nombre, correo, telefono, tipo_usuario } = req.body;
 
+const multer = require('multer');
+// const upload = multer({ dest: 'uploads/' }); 
+const fs = require('fs');
+const util = require('util');
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'uploads'); // Directorio donde se guardarán los archivos
+  },
+  filename: function (req, file, cb) {
+    // Utiliza un nombre de archivo único para evitar colisiones
+    cb(null, file.fieldname + '-' + Date.now() + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ storage: storage });
+// Promisificar fs.readFile
+const readFileAsync = util.promisify(fs.readFile);
+
+// app.post('/usuarios/registro', upload.single('cv'), async (req, res) => {
+//   try {
+//     const cvFile = req.file ? req.file.path : null; // Ruta del archivo CV en el servidor
+//     console.log('Valor de req.file:', req.file);
+//     const {
+//       dni,
+//       nombre,
+//       correo,
+//       telefono,
+//       tipo_usuario,
+//       apellido_paterno,
+//       apellido_materno,
+//       fecha_nacimiento,
+//       area,
+//       rol,
+//       categoria,
+//       fecha_ingreso,
+//       situacion,
+//       carrera,
+//       instagram,
+//       facebook,
+//       linkedin
+//     } = req.body;
+//     console.log('Valor de cvFile:', cvFile);
+//     // Validar campos
+//     const validationErrors = [];
+//     if (!dni || dni.length !== 8 || !/^\d{8}$/.test(dni)) {
+//       validationErrors.push('El DNI debe ser de 8 dígitos numéricos y es obligatorio');
+//     }
+//     if (!nombre) {
+//       validationErrors.push('El nombre es obligatorio');
+//     }
+//     if (!apellido_paterno) {
+//       validationErrors.push('El apellido paterno es obligatorio');
+//     }
+//     if (!apellido_materno) {
+//       validationErrors.push('El apellido materno es obligatorio');
+//     }
+//     if (!correo || !/\S+@\S+\.\S+/.test(correo)) {
+//       validationErrors.push('El correo es inválido o está vacío');
+//     }
+//     if (!telefono || telefono.length !== 9 || !/^\d{9}$/.test(telefono)) {
+//       validationErrors.push('El teléfono debe ser de 9 dígitos numéricos y es obligatorio');
+//     }
+//     if (!fecha_nacimiento) {
+//       validationErrors.push('La fecha de nacimiento es obligatoria');
+//     }
+//     if (!area) {
+//       validationErrors.push('El área es obligatoria');
+//     }
+//     if (!rol) {
+//       validationErrors.push('El rol es obligatorio');
+//     }
+//     if (!categoria) {
+//       validationErrors.push('La categoría es obligatoria');
+//     }
+//     if (!fecha_ingreso) {
+//       validationErrors.push('La fecha de ingreso es obligatoria');
+//     }
+//     if (!situacion) {
+//       validationErrors.push('La situación Academica es obligatoria');
+//     }
+//     if (!carrera) {
+//       validationErrors.push('La carrera es obligatoria');
+//     }
+
+//     if (validationErrors.length > 0) {
+//       return res.status(400).json({ message: 'Errores de validación', errors: validationErrors });
+//     }
+
+//     // Verificar si el usuario ya existe en la base de datos
+//     const userExistsQuery = await pool.query('SELECT * FROM usuarios WHERE dni = $1', [dni]);
+//     if (userExistsQuery.rows.length > 0) {
+//       return res.status(400).json({ message: 'El usuario ya está registrado' });
+//     }
+
+//     // Generar código de voluntario
+//     const fechaIngresoYear = new Date(fecha_ingreso).getFullYear();
+//     const categoriaAbbreviation = categoria.substring(0, 3).toUpperCase();
+//     const areaAbbreviation = area.substring(0, 3).toUpperCase();
+//     const codigo = `${fechaIngresoYear}_${categoriaAbbreviation}_${areaAbbreviation}`;
+
+//     // Usar el DNI como clave inicial
+//     const hashedPassword = await bcrypt.hash(dni, 10);
+
+//     // Leer el archivo CV como un búfer de bytes
+//     let cvBuffer = null;
+//     if (cvFile) {
+//       cvBuffer = await readFileAsync(cvFile);
+//       console.log('Contenido del CV como búfer de bytes:', cvBuffer); // Agregar esta línea para verificar el contenido de cvBuffer
+
+
+//     }
+//     console.log(cvFile);
+//     console.log(cvBuffer);
+//     // Insertar el nuevo usuario en la base de datos
+//     const insertQuery = await pool.query(
+//       'INSERT INTO usuarios (dni, nombre, password, correo, telefono, tipo_usuario, estado_usuario, apellido_paterno, apellido_materno, fecha_nacimiento, area, rol, categoria, fecha_ingreso, grado_instruccion, carrera, instagram, facebook, linkedin, codigo, cv) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)',
+//       [dni, nombre, hashedPassword, correo, telefono, tipo_usuario, true, apellido_paterno, apellido_materno, fecha_nacimiento, area, rol, categoria, fecha_ingreso, situacion, carrera, instagram, facebook, linkedin, codigo, cvBuffer]
+//     );
+
+//     // Redirigir a la pantalla de listado de usuarios con un mensaje de éxito y mostrar modal
+//     res.json({ message: 'Registrado correctamente', modal: 'Registrado' });
+
+//   } catch (error) {
+//     console.error('Error en el registro de usuario:', error);
+//     res.status(500).json({ message: 'No es posible realizar el registro' });
+//   }
+// });
+app.post('/usuarios/registro', upload.single('cv'), async (req, res) => {
   try {
+    const cvFile = req.file ? req.file.path : null; // Ruta del archivo CV en el servidor
+    console.log('Valor de req.file:', req.file);
+    const {
+      dni,
+      nombre,
+      correo,
+      telefono,
+      tipo_usuario,
+      apellido_paterno,
+      apellido_materno,
+      fecha_nacimiento,
+      area,
+      rol,
+      categoria,
+      fecha_ingreso,
+      situacion,
+      carrera,
+      instagram,
+      facebook,
+      linkedin
+    } = req.body;
+    console.log('Valor de cvFile:', cvFile);
     // Validar campos
-    if (!nombre) {
-      return res.status(400).json({ message: 'El nombre es obligatorio' });
-    }
-
+    const validationErrors = [];
     if (!dni || dni.length !== 8 || !/^\d{8}$/.test(dni)) {
-      return res.status(400).json({ message: 'El DNI debe ser de 8 dígitos numéricos y es obligatorio' });
+      validationErrors.push('El DNI debe ser de 8 dígitos numéricos y es obligatorio');
     }
-
-    if (!correo || !/\S+@\S+\.\S+/.test(correo)) {
-      return res.status(400).json({ message: 'El correo es inválido o está vacío' });
+    if (!nombre) {
+      validationErrors.push('El nombre es obligatorio');
     }
+    // Validar los demás campos...
 
-    if (!telefono || telefono.length !== 9 || !/^\d{9}$/.test(telefono)) {
-      return res.status(400).json({ message: 'El teléfono debe ser de 9 dígitos numéricos y es obligatorio' });
-    }
-
-    if (!tipo_usuario) {
-      return res.status(400).json({ message: 'El tipo de usuario es obligatorio' });
+    if (validationErrors.length > 0) {
+      return res.status(400).json({ message: 'Errores de validación', errors: validationErrors });
     }
 
     // Verificar si el usuario ya existe en la base de datos
@@ -202,22 +385,37 @@ app.post('/usuarios/registro', async (req, res) => {
       return res.status(400).json({ message: 'El usuario ya está registrado' });
     }
 
+    // Generar código de voluntario
+    const fechaIngresoYear = new Date(fecha_ingreso).getFullYear();
+    const categoriaAbbreviation = categoria.substring(0, 3).toUpperCase();
+    const areaAbbreviation = area.substring(0, 3).toUpperCase();
+    const codigo = `${fechaIngresoYear}_${categoriaAbbreviation}_${areaAbbreviation}`;
+
     // Usar el DNI como clave inicial
     const hashedPassword = await bcrypt.hash(dni, 10);
 
+    // Leer el archivo CV como un búfer de bytes
+    let cvBuffer = null;
+    if (cvFile) {
+      cvBuffer = await readFileAsync(cvFile);
+      console.log('Contenido del CV como búfer de bytes:', cvBuffer); // Agregar esta línea para verificar el contenido de cvBuffer
+    }
+
     // Insertar el nuevo usuario en la base de datos
     const insertQuery = await pool.query(
-      'INSERT INTO usuarios (dni, nombre, password, correo, telefono, tipo_usuario, estado_usuario) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-      [dni, nombre, hashedPassword, correo, telefono, tipo_usuario, true]
+      'INSERT INTO usuarios (dni, nombre, password, correo, telefono, tipo_usuario, estado_usuario, apellido_paterno, apellido_materno, fecha_nacimiento, area, rol, categoria, fecha_ingreso, grado_instruccion, carrera, instagram, facebook, linkedin, codigo, cv) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)',
+      [dni, nombre, hashedPassword, correo, telefono, tipo_usuario, true, apellido_paterno, apellido_materno, fecha_nacimiento, area, rol, categoria, fecha_ingreso, situacion, carrera, instagram, facebook, linkedin, codigo, cvBuffer]
     );
 
     // Redirigir a la pantalla de listado de usuarios con un mensaje de éxito y mostrar modal
     res.json({ message: 'Registrado correctamente', modal: 'Registrado' });
+
   } catch (error) {
     console.error('Error en el registro de usuario:', error);
     res.status(500).json({ message: 'No es posible realizar el registro' });
   }
 });
+
 
 // Endpoint para redirigir a la pantalla de listado de usuarios desde la pantalla de registro de usuarios
 app.get('/usuarios/listado', (req, res) => {
@@ -263,7 +461,7 @@ app.put('/usuarios/:id/estado', async (req, res) => {
 // Endpoint para editar un usuario específico
 app.put('/usuarios/:id', async (req, res) => {
   const userId = req.params.id;
-  const { nombre, correo, telefono, tipo_usuario } = req.body;
+  const { nombre, apellido_paterno,apellido_materno,correo, telefono, tipo_usuario } = req.body;
 
   try {
     // Verificar si el usuario existe en la base de datos
@@ -276,8 +474,8 @@ app.put('/usuarios/:id', async (req, res) => {
 
     // Actualizar la información del usuario
     await pool.query(
-      'UPDATE usuarios SET nombre = $1, correo = $2, telefono = $3, tipo_usuario = $4 WHERE id = $5',
-      [nombre, correo, telefono, tipo_usuario, userId]
+      'UPDATE usuarios SET nombre = $1, correo = $2, telefono = $3, tipo_usuario = $4,apellido_materno=$5,apellido_paterno=$6 WHERE id = $7',
+      [nombre, correo, telefono, tipo_usuario,apellido_materno,apellido_paterno, userId]
     );
 
     res.json({ message: 'Usuario actualizado correctamente' });
@@ -305,6 +503,7 @@ app.put('/usuarios/:id/cambiar-contrasena', async (req, res) => {
     if (!contrasenaValida) {
       return res.status(401).json({ message: 'Contraseña actual incorrecta' });
     }
+    
 
     // Hashear la nueva contraseña
     const nuevaContrasenaHash = await bcrypt.hash(nuevaContrasena, 10);
@@ -323,7 +522,242 @@ app.put('/usuarios/:id/cambiar-contrasena', async (req, res) => {
 });
 
 
-// Otros endpoints para obtener información según el rol, etc.
+app.get('/variables-sistema', async (req, res) => {
+  try {
+      const result = await pool.query('SELECT * FROM variables');
+      res.json(result.rows);
+  } catch (error) {
+      console.error('Error al obtener usuarios:', error);
+      res.status(500).json({ message: 'Error en el servidor al obtener usuarios' });
+  }
+});
+
+app.get('/variables-sistema/valores', async (req, res) => {
+  const nombreVariable = req.query.nombre; // Obtiene el nombre de la variable de los parámetros de la consulta
+
+  if (!nombreVariable) {
+    return res.status(400).json({ message: 'El nombre de la variable es requerido' });
+  }
+
+  try {
+      const result = await pool.query(`
+        SELECT valor
+        FROM (
+          SELECT UNNEST(ARRAY[valor1, valor2, valor3]) AS valor
+          FROM public.variables
+          WHERE Nombre = $1
+        ) AS valores
+        WHERE valor <> ''
+        ORDER BY valor ASC;
+      `, [nombreVariable]);
+      res.json(result.rows.map(row => row.valor));
+  } catch (error) {
+      console.error(`Error al obtener los valores para la variable ${nombreVariable}:`, error);
+      res.status(500).json({ message: 'Error en el servidor al obtener los valores' });
+  }
+});
+
+
+
+
+
+
+app.post('/variables-sistema/registro', async (req, res) => {
+  const { nombre,descripcion, valor1, valor2, valor3 } = req.body;
+
+  try {
+    // Validar campos
+    if (!nombre) {
+      return res.status(400).json({ message: 'El nombre es obligatorio' });
+    }
+
+    if (!valor1) {
+      return res.status(400).json({ message: 'El Valor1 es obligatorio' });
+    }
+
+    // Insertar la variable a la Bd
+    const insertQuery = await pool.query(
+      'INSERT INTO variables (nombre, descripcion, valor1, valor2,valor3,estado) VALUES ($1, $2, $3, $4, $5, $6)',
+      [nombre, descripcion, valor1,valor2,valor3, true]
+    );
+    res.json({ message: 'Registrado correctamente', modal: 'Registrado' });
+  } catch (error) {
+    console.error('Error en el registro de la variable:', error);
+    res.status(500).json({ message: 'No es posible realizar el registro' });
+  }
+});
+app.put('/variables-sistema/:id/estado', async (req, res) => {
+  const variableId = req.params.id;
+  const { nuevoEstado } = req.body; // Nuevo estado del usuario (baja o alta)
+
+  try {
+    // Verificar si el usuario existe en la base de datos
+    const userQuery = await pool.query('SELECT * FROM variables WHERE id = $1', [variableId]);
+    const variable = userQuery.rows[0];
+
+    if (!variable) {
+      return res.status(404).json({ message: 'variable no encontrada' });
+    }
+
+    let estadoVariable;
+    // Determinar el nuevo estado del usuario
+    if (nuevoEstado === 'alta') {
+      estado = true;
+    } else if (nuevoEstado === 'baja') {
+      estado = false;
+    } else {
+      return res.status(400).json({ message: 'El nuevo estado debe ser "alta" o "baja"' });
+    }
+
+    // Actualizar el estado del usuario
+    await pool.query('UPDATE variables SET estado = $1 WHERE id = $2', [estado, variableId]);
+
+    // Enviar respuesta exitosae
+    res.json({ message: `La variable ha sido marcada como "${nuevoEstado}"` });
+  } catch (error) {
+    console.error('Error al cambiar el estado de la variable :', error);
+    res.status(500).json({ message: 'No es posible cambiar el estado de la variable' });
+  }
+});
+app.get('/variables-sistema/:id', async (req, res) => {
+  const { id } = req.params; // Extrae el ID del parámetro de ruta
+
+  try {
+    // Realiza una consulta a la base de datos para obtener el usuario por su ID
+    const result = await pool.query('SELECT * FROM variables WHERE id = $1', [id]);
+
+    if (result.rows.length === 0) {
+      // Si no se encuentra el usuario, devuelve un error 404
+      return res.status(404).json({ message: 'Variable no encontrada' });
+    }
+
+    // Si el usuario se encuentra, devuelve el usuario como respuesta JSON
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al obtener Variable por ID:', error);
+    res.status(500).json({ message: 'Error en el servidor al obtener La variable' });
+  }
+});
+app.put('/variables-sistema/:id', async (req, res) => {
+  const variableId = req.params.id;
+  const { nombre, descripcion, valor1, valor2,valor3 } = req.body;
+
+  try {
+    // Verificar si el usuario existe en la base de datos
+    const userQuery = await pool.query('SELECT * FROM variables WHERE id = $1', [variableId]);
+    const variable = userQuery.rows[0];
+
+    if (!variable) {
+      return res.status(404).json({ message: 'Variable no encontrada' });
+    }
+
+    // Actualizar la información del usuario
+    await pool.query(
+      'UPDATE variables SET nombre = $1, descripcion = $2, valor1 = $3, valor2 = $4 , valor3=$5 WHERE id = $6',
+      [nombre, descripcion, valor1, valor2,valor3 ,variableId]
+    );
+
+    res.json({ message: 'Variable actualizada correctamente' });
+  } catch (error) {
+    console.error('Error al editar Variable:', error);
+    res.status(500).json({ message: 'Error al editar Variable' });
+  }
+});
+
+app.get('/voluntarios', async (req, res) => {
+  try {
+      const result = await pool.query("select *from usuarios WHERE tipo_usuario='VOLUNTARIO'");
+      res.json(result.rows);
+  } catch (error) {
+      console.error('Error al obtener voluntarios:', error);
+      res.status(500).json({ message: 'Error en el servidor al obtener voluntarios' });
+  }
+});
+
+
+
+// Obtener historial de voluntariados para un voluntario
+app.get('/voluntarios/:id/historial', async (req, res) => {
+  const { id } = req.params; // Obtén el ID de los parámetros de la URL
+  try {
+    const query = `
+      SELECT 
+        v.id,
+        u.nombre, ' ', u.apellido_paterno, ' ', u.apellido_materno,
+        v.lugar,
+        v.descripcion
+      FROM 
+        voluntariados v
+      JOIN 
+        usuarios u ON v.id_usuario = u.id
+      WHERE 
+        u.id = $1 AND u.tipo_usuario = 'VOLUNTARIO';
+    `;
+    
+    // Ejecuta la consulta SQL
+    const result = await pool.query(query, [id]);
+
+    // Si no se encuentran resultados
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'No se encontraron voluntariados' });
+    }
+
+    // Si se encuentran resultados, devolverlos
+    res.json(result.rows);
+  } catch (error) {
+    // Manejo de errores
+    console.error('Error al obtener historial:', error);
+    res.status(500).json({ message: 'Error en el servidor al obtener el historial' });
+  }
+});
+
+
+function verificarVoluntario(req, res, next) {
+  const { tipo_usuario } = req.user; // Supone que ya tienes autenticación implementada
+
+  if (tipo_usuario !== 'VOLUNTARIO') {
+    return res.status(403).json({ message: 'Acceso Restringido' });
+  }
+  next();
+}
+
+app.get('/voluntarios/:id/feedback', async (req, res) => {
+  const { id } = req.params; // ID del voluntariado
+  try {
+    const query = `
+      SELECT 
+        fb.id AS feedback_id,
+        fb.fecha AS feedback_fecha,
+        fb.reconocimiento,
+        fb.oportunidad_mejora,
+        fb.adicional,
+        fb.mentor
+      FROM feedback fb
+      WHERE fb.id_voluntariado = $1
+      ORDER BY fb.fecha;
+    `;
+
+    const result = await pool.query(query, [id]);
+    console.log(result.rows)
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'No se encontró feedback para este voluntariado' });
+    }
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener feedback:', error);
+    res.status(500).json({ message: 'Error en el servidor al obtener el feedback' });
+  }
+});
+
+
+
+
+
+
+
+
+
 
 app.listen(port, () => {
   console.log(`Servidor escuchando en http://localhost:${port}`);
