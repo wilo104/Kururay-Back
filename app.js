@@ -57,7 +57,7 @@ app.post('/login', async (req, res) => {
  
     // Generar el token JWT con un secreto seguro
     const secretKey = process.env.JWT_SECRET_KEY || 'tu_secreto_secreto';
-    const token = jwt.sign({ dni: userQuery.rows[0].dni, role: userQuery.rows[0].role }, secretKey);
+    const token = jwt.sign({ dni: userQuery.rows[0].dni, tipo_usuario: userQuery.rows[0].tipo_usuario }, secretKey);
 
     // Incluir el rol y el ID en la respuesta
     const tipo_usuario = userQuery.rows[0].tipo_usuario;
@@ -750,6 +750,76 @@ app.get('/voluntarios/:id/feedback', async (req, res) => {
   }
 });
 
+
+
+
+
+
+
+
+function authenticateToken(req, res, next) {
+  const token = req.get('Authorization')?.split(' ')[1]; // Obtener el token del encabezado 'Authorization'
+
+  console.log('Token recibido:', token); // Para depuración, puedes ver si el token llega correctamente
+
+  if (!token) {
+    return res.status(401).json({ message: 'Token no proporcionado' }); // Respuesta si no hay token
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET || 'tu_secreto_secreto', (err, user) => {
+    if (err) {
+      console.error('Error de verificación de token:', err); // Para depuración
+      return res.status(403).json({ message: 'Token no válido' }); // Respuesta si el token no es válido
+    }
+
+    if (!user || !user.tipo_usuario) { 
+      // Asegúrate de que `user` y `tipo_usuario` estén presentes en el payload
+      return res.status(403).json({ message: 'Token no contiene información de rol' });
+    }
+
+    req.user = user; // Almacenar el usuario en `req.user` para usarlo en las rutas protegidas
+    next(); // Llamar a `next()` para pasar a la siguiente función o ruta
+  });
+}
+
+module.exports = authenticateToken;
+
+
+app.get('/voluntariados', authenticateToken, async (req, res) => {
+  const rol  = req.user.tipo_usuario; // Asegúrate de que req.user esté correctamente poblado
+  console.log(req.user.tipo_usuario);
+  console.log('Rol del usuario:', rol); // Verifica el valor del rol
+  try {
+    // Verifica que el rol esté presente y sea uno de los roles permitidos
+    if (!rol || !['ADMINISTRADOR', 'RRHH', 'MENTOR'].includes(rol.toUpperCase())) {
+      return res.status(403).json({ message: 'Acceso Restringido' });
+    }
+
+    const query = `
+      SELECT 
+          v.id, 
+          u.nombre, 
+          v.tipo, 
+          v.fecha_inicio, 
+          v.estado_voluntario 
+      FROM voluntariados v
+      JOIN usuarios u ON v.id_usuario = u.id
+      ORDER BY v.fecha_inicio DESC;
+    `;
+
+    const result = await pool.query(query); // Ejecuta la consulta
+    console.log('Resultado de la consulta:', result.rows); 
+    // Si no hay resultados, puedes manejarlo de manera adecuada
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'No se encontraron voluntariados' });
+    }
+
+    res.json(result.rows); // Responde con los datos
+  } catch (error) {
+    console.error('Error al obtener voluntariados:', error); // Registra el error en consola
+    res.status(500).json({ message: 'Error en el servidor al obtener los voluntariados', error: error.message });
+  }
+});
 
 
 
