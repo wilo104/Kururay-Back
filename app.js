@@ -679,29 +679,67 @@ app.get('/voluntarios', async (req, res) => {
 
 
 // Obtener historial de voluntariados para un voluntario
+// app.get('/voluntarios/:id/historial', async (req, res) => {
+//   const { id } = req.params; // Obtén el ID de los parámetros de la URL
+//   try {
+//     const query = `
+//       SELECT 
+//         v.id,
+//         u.nombre, ' ', u.apellido_paterno, ' ', u.apellido_materno,
+//         v.lugar,
+//         v.descripcion
+//       FROM 
+//         voluntariados v
+//       JOIN 
+//         usuarios u ON v.id_usuario = u.id
+//       WHERE 
+//         u.id = $1 AND u.tipo_usuario = 'VOLUNTARIO';
+//     `;
+    
+//     // Ejecuta la consulta SQL
+//     const result = await pool.query(query, [id]);
+
+//     // Si no se encuentran resultados
+//     if (result.rows.length === 0) {
+//       return res.status(404).json({ message: 'No se encontraron voluntariados' });
+//     }
+
+//     // Si se encuentran resultados, devolverlos
+//     res.json(result.rows);
+//   } catch (error) {
+//     // Manejo de errores
+//     console.error('Error al obtener historial:', error);
+//     res.status(500).json({ message: 'Error en el servidor al obtener el historial' });
+//   }
+// });
+
 app.get('/voluntarios/:id/historial', async (req, res) => {
-  const { id } = req.params; // Obtén el ID de los parámetros de la URL
+  const { id } = req.params; // Obtén el ID del voluntario de los parámetros de la URL
   try {
     const query = `
       SELECT 
-        v.id,
-        u.nombre, ' ', u.apellido_paterno, ' ', u.apellido_materno,
+        v.id AS id_voluntariado,
+        v.nombre,
+        CONCAT(u.nombre, ' ', u.apellido_paterno, ' ', u.apellido_materno) AS nombre_completo,
         v.lugar,
-        v.descripcion
+        v.descripcion,
+        va.fecha_asignacion
       FROM 
         voluntariados v
       JOIN 
-        usuarios u ON v.id_usuario = u.id
+        voluntarios_asignados va ON v.id = va.id_voluntariado
+      JOIN 
+        usuarios u ON va.id_voluntario = u.id
       WHERE 
-        u.id = $1 AND u.tipo_usuario = 'VOLUNTARIO';
+        u.id = $1; -- Filtra por el ID del voluntario
     `;
     
     // Ejecuta la consulta SQL
     const result = await pool.query(query, [id]);
-
+    console.log(result);
     // Si no se encuentran resultados
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'No se encontraron voluntariados' });
+      return res.status(404).json({ message: 'No se encontraron voluntariados para este voluntario' });
     }
 
     // Si se encuentran resultados, devolverlos
@@ -712,6 +750,7 @@ app.get('/voluntarios/:id/historial', async (req, res) => {
     res.status(500).json({ message: 'Error en el servidor al obtener el historial' });
   }
 });
+
 
 
 function verificarVoluntario(req, res, next) {
@@ -807,7 +846,7 @@ app.get('/voluntariados', authenticateToken, async (req, res) => {
           v.nombre, 
           v.tipo, 
           v.fecha_inicio, 
-          v.estado_voluntario 
+          v.estado_voluntariado
       FROM voluntariados v
       ORDER BY v.fecha_inicio DESC;
     `;
@@ -1004,7 +1043,77 @@ app.put('/voluntariados/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Endpoint para cambiar el estado de un voluntariado
+app.put('/voluntariados/:id/estado', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { estado_voluntariado } = req.body; // Usar el nuevo nombre de columna
 
+  if (!estado_voluntariado) {
+    return res.status(400).json({ message: 'Campo estado_voluntariado es obligatorio' });
+  }
+
+  try {
+    const query = `
+      UPDATE voluntariados
+      SET estado_voluntariado = $1
+      WHERE id = $2
+      RETURNING *;
+    `;
+    const values = [estado_voluntariado, id];
+
+    const result = await pool.query(query, values);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Voluntariado no encontrado' });
+    }
+
+    res.status(200).json({ message: 'Estado actualizado correctamente', data: result.rows[0] });
+  } catch (error) {
+    console.error('Error al actualizar estado del voluntariado:', error);
+    res.status(500).json({ message: 'Error del servidor', error: error.message });
+  }
+});
+
+
+app.get('/voluntariados/voluntarios/no-asignados', authenticateToken, async (req, res) => {
+  try {
+    const query = `
+      SELECT u.id, CONCAT(u.nombre, ' ', u.apellido_paterno, ' ', u.apellido_materno) AS nombre_completo
+      FROM usuarios u
+      LEFT JOIN voluntarios_asignados va ON u.id = va.id_voluntario
+      WHERE u.tipo_usuario = 'VOLUNTARIO'
+        AND va.id_voluntariado IS NULL;
+    `;
+    const result = await pool.query(query);
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener voluntarios sin asignación:', error);
+    res.status(500).json({ message: 'Error al obtener voluntarios sin asignación' });
+  }
+});
+
+
+app.post('/voluntariados/voluntarios/asignar', authenticateToken, async (req, res) => {
+  const { id_voluntariado, id_voluntario } = req.body;
+
+  if (!id_voluntariado || !id_voluntario) {
+    return res.status(400).json({ message: 'Faltan datos obligatorios' });
+  }
+
+  try {
+    const query = `
+      INSERT INTO voluntarios_asignados (id_voluntariado, id_voluntario)
+      VALUES ($1, $2)
+      RETURNING *;
+    `;
+    const values = [id_voluntariado, id_voluntario];
+    const result = await pool.query(query, values);
+    res.status(200).json({ message: 'Voluntario asignado con éxito', data: result.rows[0] });
+  } catch (error) {
+    console.error('Error al asignar voluntario:', error);
+    res.status(500).json({ message: 'Error al asignar voluntario', error: error.message });
+  }
+});
 
 
 
