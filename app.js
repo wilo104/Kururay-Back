@@ -3,17 +3,16 @@ const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const { Pool } = require('pg');
-const cors = require('cors'); // Importa el middleware cors
-
+const cors = require('cors');
 const path = require('path');
+const multer = require('multer');
+const fs = require('fs');
+const util = require('util');
+
 const app = express();
 const port = 3000;
 
-
-
 app.use(bodyParser.json());
-
-// Configura CORS para permitir solicitudes desde cualquier origen (*)
 app.use(cors());
 
 const pool = new Pool({
@@ -24,476 +23,177 @@ const pool = new Pool({
     port: 5432,
 });
 
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, 'uploads');
+    },
+    filename: (req, file, cb) => {
+        cb(null, file.fieldname + '-' + Date.now() + path.extname(file.originalname));
+    },
+});
+const upload = multer({ storage });
+const readFileAsync = util.promisify(fs.readFile);
 
+// Login
 app.post('/login', async (req, res) => {
   const { dni, password } = req.body;
 
   try {
-    // Validar entrada
     if (!dni || !password) {
-      return res.status(400).json({ message: 'Por favor, ingrese DNI y contraseña' });
+      return res.status(400).json({ message: 'Ingrese DNI y contraseña' });
     }
 
-    // Realizar la autenticación en la base de datos
-    // Asegúrate de incluir `id` en la selección de tu consulta SQL
-    const userQuery = await pool.query('SELECT id, dni, password, tipo_usuario, estado_usuario FROM usuarios WHERE dni = $1', [dni]);
+    // Consultar en la tabla usuarios
+    let userQuery = await pool.query('SELECT id, dni, password, tipo_usuario, estado_usuario FROM usuarios WHERE dni = $1', [dni]);
 
     if (userQuery.rows.length === 0) {
-      return res.status(401).json({ message: 'Usuario o contraseña incorrectos' });
+      // Si no se encuentra en `usuarios`, buscar en `voluntarios`
+      userQuery = await pool.query('SELECT id, dni, password FROM voluntarios WHERE dni = $1', [dni]);
+
+      if (userQuery.rows.length === 0) {
+        return res.status(401).json({ message: 'Usuario o contraseña incorrectos' });
+      }
+
+      const storedPasswordHash = userQuery.rows[0].password;
+
+      // Comparar contraseñas
+      if (!(await bcrypt.compare(password, storedPasswordHash))) {
+        return res.status(401).json({ message: 'Usuario o contraseña incorrectos' });
+      }
+
+      // Generar token JWT para voluntario
+      const token = jwt.sign(
+        { id: userQuery.rows[0].id, dni: userQuery.rows[0].dni, tipo_usuario: 'VOLUNTARIO' },
+        process.env.JWT_SECRET || 'tu_secreto_secreto'
+      );
+
+      return res.json({
+        token,
+        tipo_usuario: 'VOLUNTARIO',
+        id: userQuery.rows[0].id,
+      });
     }
 
+    // Si el usuario está en la tabla `usuarios`, verificar contraseña
     const storedPasswordHash = userQuery.rows[0].password;
 
     if (!(await bcrypt.compare(password, storedPasswordHash))) {
       return res.status(401).json({ message: 'Usuario o contraseña incorrectos' });
     }
 
-    // Verificar el estado del usuario
-    const estadoUsuario = userQuery.rows[0].estado_usuario;
-    if (estadoUsuario === false) {
-      return res.status(403).json({ message: 'Su cuenta se encuentra en estado de baja. Por favor, contacte al administrador.' });
+    if (!userQuery.rows[0].estado_usuario) {
+      return res.status(403).json({ message: 'Cuenta inactiva. Contacte al administrador.' });
     }
-    const clave_dni = password === userQuery.rows[0].dni; // Esta línea reemplaza tu implementación de clave_dni
- 
-    // Generar el token JWT con un secreto seguro
+
+    // Generar token JWT para usuario
     const token = jwt.sign(
       { id: userQuery.rows[0].id, dni: userQuery.rows[0].dni, tipo_usuario: userQuery.rows[0].tipo_usuario },
       process.env.JWT_SECRET || 'tu_secreto_secreto'
     );
 
-    // Incluir el rol y el ID en la respuesta
-    const tipo_usuario = userQuery.rows[0].tipo_usuario;
-    const id = userQuery.rows[0].id; // Obtener el ID del usuario de la consulta
-
-    res.json({ token, tipo_usuario, id, clave_dni }); // Incluir el ID en la respuesta JSON
+    res.json({
+      token,
+      tipo_usuario: userQuery.rows[0].tipo_usuario,
+      id: userQuery.rows[0].id,
+    });
   } catch (error) {
     console.error('Error en la autenticación:', error);
     res.status(500).json({ message: 'Error en el servidor durante la autenticación' });
   }
 });
 
+// *************SECCION USUARIOS****************
 
-
+// Obtener lista de usuarios
 app.get('/usuarios', async (req, res) => {
-  // Lista blanca de columnas y direcciones permitidas
-  const columnasPermitidas = ['id', 'nombre', 'apellido_paterno', 'correo', 'telefono'];
-  const direccionPermitida = ['ASC', 'DESC'];
-
-  // Obtener parámetros de consulta
-  let { ordenPor, direccion } = req.query;
-
-  // Validar columna (por defecto: 'id')
-  ordenPor = columnasPermitidas.includes(ordenPor) ? ordenPor : 'id';
-
-  // Validar dirección (por defecto: 'ASC')
-  if (typeof direccion === 'string') {
-    direccion = direccion.toUpperCase(); // Convertir a mayúsculas si existe
-    direccion = direccionPermitida.includes(direccion) ? direccion : 'ASC';
-  } else {
-    direccion = 'ASC'; // Asignar valor predeterminado
-  }
-
   try {
-    // Realizar consulta a la base de datos
-    const query = `SELECT * FROM usuarios ORDER BY ${ordenPor} ${direccion}`;
-    const result = await pool.query(query);
-
-    // Responder con los resultados
-    res.json(result.rows);
+      const result = await pool.query('SELECT *FROM usuarios ORDER BY id ASC');
+      res.json(result.rows);
   } catch (error) {
-    console.error('Error al obtener usuarios:', error.message);
-    res.status(500).json({
-      message: 'Error en el servidor al obtener usuarios',
-      error: error.message, // Información extra (opcional)
-    });
+      console.error('Error al obtener usuarios:', error.message);
+      res.status(500).json({ message: 'Error en el servidor al obtener usuarios' });
   }
 });
 
-
-// app.get('/usuarios/:id/cv', async (req, res) => {
-//   const userId = req.params.id;
-
-//   try {
-//     // Buscar el usuario en la base de datos
-//     const userQuery = await pool.query('SELECT * FROM usuarios WHERE id = $1', [userId]);
-//     const usuario = userQuery.rows[0];
-
-//     if (!usuario) {
-//       return res.status(404).json({ message: 'Usuario no encontrado' });
-//     }
-
-//     // Verificar si el usuario tiene un CV
-//     if (!usuario.cv) {
-//       return res.status(404).json({ message: 'CV no encontrado para este usuario' });
-//     }
-//     console.log('Ruta del archivo CV:', usuario.cv);
-//     // Leer el archivo CV desde la ubicación donde multer lo almacenó
-//     const cvContent = await readFileAsync(usuario.cv);
- 
-//     // Devolver el contenido del CV como respuesta
-//     res.setHeader('Content-Type', 'application/pdf'); // Por ejemplo, si el CV es un PDF
-//     res.send(cvContent);
-//   } catch (error) {
-//     console.error('Error al obtener el CV del usuario:', error);
-//     res.status(500).json({ message: 'Error al obtener el CV del usuario', error: error.message });
-//   }
-// });
-// Endpoint para obtener un usuario específico por ID
-app.get('/usuarios/:id/cv', async (req, res) => {
-  const userId = req.params.id;
-
-  try {
-    // Obtener el contenido del archivo CV como un búfer de bytes desde la base de datos
-    const userQuery = await pool.query('SELECT cv FROM usuarios WHERE id = $1', [userId]);
-    const cvFileBuffer = userQuery.rows[0].cv;
-
-    // Devolver el contenido del CV como respuesta
-    res.setHeader('Content-Type', 'application/pdf');
-    res.send(cvFileBuffer);
-  } catch (error) {
-    console.error('Error al obtener el CV del usuario:', error);
-    res.status(500).json({ message: 'Error al obtener el CV del usuario' });
-  }
-});
+// Obtener usuario por ID
 app.get('/usuarios/:id', async (req, res) => {
-  const { id } = req.params; // Extrae el ID del parámetro de ruta
-
+  const { id } = req.params;
   try {
-    // Realiza una consulta a la base de datos para obtener el usuario por su ID
-    const result = await pool.query('SELECT * FROM usuarios WHERE id = $1', [id]);
+      const result = await pool.query('SELECT * FROM usuarios WHERE id = $1', [id]);
+      if (result.rows.length === 0) return res.status(404).json({ message: 'Usuario no encontrado' });
 
-    if (result.rows.length === 0) {
-      // Si no se encuentra el usuario, devuelve un error 404
-      return res.status(404).json({ message: 'Usuario no encontrado' });
-    }
-
-    // Si el usuario se encuentra, devuelve el usuario como respuesta JSON
-    res.json(result.rows[0]);
+      res.json(result.rows[0]);
   } catch (error) {
-    console.error('Error al obtener el usuario por ID:', error);
-    res.status(500).json({ message: 'Error en el servidor al obtener el usuario' });
+      console.error('Error al obtener usuario por ID:', error);
+      res.status(500).json({ message: 'Error en el servidor al obtener el usuario' });
   }
 });
-
-// Endpoint para redirigir a la pantalla de registro de usuarios desde la pantalla de listado de usuarios
-app.get('/usuarios/registro', (req, res) => {
-  // Redirigir a la pantalla de registro de usuarios
-  res.redirect('/usuarios/registro');
-});
-
-// Endpoint para registrar un nuevo usuario
-// app.post('/usuarios/registro', async (req, res) => {
-//   const { dni, nombre, apellido_paterno, apellido_materno, password, correo, telefono, tipo_usuario } = req.body;
-
-//   try {
-//     // Validar campos
-//     if (!dni || !nombre || !apellido_paterno || !password || !correo || !telefono || !tipo_usuario) {
-//       return res.status(400).json({ message: 'Todos los campos son obligatorios' });
-//     }
-
-//     // Verificar si el usuario ya existe en la base de datos
-//     const userExistsQuery = await pool.query('SELECT * FROM usuarios WHERE dni = $1', [dni]);
-//     if (userExistsQuery.rows.length > 0) {
-//       return res.status(400).json({ message: 'El usuario ya está registrado' });
-//     }
-
-//     // Hash de la contraseña antes de almacenarla en la base de datos
-//     const hashedPassword = await bcrypt.hash(password, 10);
-
-//     // Insertar el nuevo usuario en la base de datos
-//     const insertQuery = await pool.query(
-//       'INSERT INTO usuarios (dni, nombre, apellido_paterno, apellido_materno, password, correo, telefono, tipo_usuario, estado_usuario) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-//       [dni, nombre, apellido_paterno, apellido_materno, hashedPassword, correo, telefono, tipo_usuario, true]
-//     );
-
-//     // Redirigir a la pantalla de listado de usuarios con un mensaje de éxito
-//     res.json({ message: 'Registrado correctamente' });
-//   } catch (error) {
-//     console.error('Error en el registro de usuario:', error);
-//     res.status(500).json({ message: 'No es posible realizar el registro' });
-//   }
-// });
-
-
-
-const multer = require('multer');
-// const upload = multer({ dest: 'uploads/' }); 
-const fs = require('fs');
-const util = require('util');
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads'); // Directorio donde se guardarán los archivos
-  },
-  filename: function (req, file, cb) {
-    // Utiliza un nombre de archivo único para evitar colisiones
-    cb(null, file.fieldname + '-' + Date.now() + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({ storage: storage });
-// Promisificar fs.readFile
-const readFileAsync = util.promisify(fs.readFile);
-
-// app.post('/usuarios/registro', upload.single('cv'), async (req, res) => {
-//   try {
-//     const cvFile = req.file ? req.file.path : null; // Ruta del archivo CV en el servidor
-//     console.log('Valor de req.file:', req.file);
-//     const {
-//       dni,
-//       nombre,
-//       correo,
-//       telefono,
-//       tipo_usuario,
-//       apellido_paterno,
-//       apellido_materno,
-//       fecha_nacimiento,
-//       area,
-//       rol,
-//       categoria,
-//       fecha_ingreso,
-//       situacion,
-//       carrera,
-//       instagram,
-//       facebook,
-//       linkedin
-//     } = req.body;
-//     console.log('Valor de cvFile:', cvFile);
-//     // Validar campos
-//     const validationErrors = [];
-//     if (!dni || dni.length !== 8 || !/^\d{8}$/.test(dni)) {
-//       validationErrors.push('El DNI debe ser de 8 dígitos numéricos y es obligatorio');
-//     }
-//     if (!nombre) {
-//       validationErrors.push('El nombre es obligatorio');
-//     }
-//     if (!apellido_paterno) {
-//       validationErrors.push('El apellido paterno es obligatorio');
-//     }
-//     if (!apellido_materno) {
-//       validationErrors.push('El apellido materno es obligatorio');
-//     }
-//     if (!correo || !/\S+@\S+\.\S+/.test(correo)) {
-//       validationErrors.push('El correo es inválido o está vacío');
-//     }
-//     if (!telefono || telefono.length !== 9 || !/^\d{9}$/.test(telefono)) {
-//       validationErrors.push('El teléfono debe ser de 9 dígitos numéricos y es obligatorio');
-//     }
-//     if (!fecha_nacimiento) {
-//       validationErrors.push('La fecha de nacimiento es obligatoria');
-//     }
-//     if (!area) {
-//       validationErrors.push('El área es obligatoria');
-//     }
-//     if (!rol) {
-//       validationErrors.push('El rol es obligatorio');
-//     }
-//     if (!categoria) {
-//       validationErrors.push('La categoría es obligatoria');
-//     }
-//     if (!fecha_ingreso) {
-//       validationErrors.push('La fecha de ingreso es obligatoria');
-//     }
-//     if (!situacion) {
-//       validationErrors.push('La situación Academica es obligatoria');
-//     }
-//     if (!carrera) {
-//       validationErrors.push('La carrera es obligatoria');
-//     }
-
-//     if (validationErrors.length > 0) {
-//       return res.status(400).json({ message: 'Errores de validación', errors: validationErrors });
-//     }
-
-//     // Verificar si el usuario ya existe en la base de datos
-//     const userExistsQuery = await pool.query('SELECT * FROM usuarios WHERE dni = $1', [dni]);
-//     if (userExistsQuery.rows.length > 0) {
-//       return res.status(400).json({ message: 'El usuario ya está registrado' });
-//     }
-
-//     // Generar código de voluntario
-//     const fechaIngresoYear = new Date(fecha_ingreso).getFullYear();
-//     const categoriaAbbreviation = categoria.substring(0, 3).toUpperCase();
-//     const areaAbbreviation = area.substring(0, 3).toUpperCase();
-//     const codigo = `${fechaIngresoYear}_${categoriaAbbreviation}_${areaAbbreviation}`;
-
-//     // Usar el DNI como clave inicial
-//     const hashedPassword = await bcrypt.hash(dni, 10);
-
-//     // Leer el archivo CV como un búfer de bytes
-//     let cvBuffer = null;
-//     if (cvFile) {
-//       cvBuffer = await readFileAsync(cvFile);
-//       console.log('Contenido del CV como búfer de bytes:', cvBuffer); // Agregar esta línea para verificar el contenido de cvBuffer
-
-
-//     }
-//     console.log(cvFile);
-//     console.log(cvBuffer);
-//     // Insertar el nuevo usuario en la base de datos
-//     const insertQuery = await pool.query(
-//       'INSERT INTO usuarios (dni, nombre, password, correo, telefono, tipo_usuario, estado_usuario, apellido_paterno, apellido_materno, fecha_nacimiento, area, rol, categoria, fecha_ingreso, grado_instruccion, carrera, instagram, facebook, linkedin, codigo, cv) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)',
-//       [dni, nombre, hashedPassword, correo, telefono, tipo_usuario, true, apellido_paterno, apellido_materno, fecha_nacimiento, area, rol, categoria, fecha_ingreso, situacion, carrera, instagram, facebook, linkedin, codigo, cvBuffer]
-//     );
-
-//     // Redirigir a la pantalla de listado de usuarios con un mensaje de éxito y mostrar modal
-//     res.json({ message: 'Registrado correctamente', modal: 'Registrado' });
-
-//   } catch (error) {
-//     console.error('Error en el registro de usuario:', error);
-//     res.status(500).json({ message: 'No es posible realizar el registro' });
-//   }
-// });
 app.post('/usuarios/registro', upload.single('cv'), async (req, res) => {
+  const {
+    dni,
+    nombre,
+    apellido_paterno,
+    apellido_materno,
+    correo,
+    telefono,
+    tipo_usuario,
+  } = req.body; // `req.body` contiene los campos enviados
+
+  console.log('Datos recibidos en el backend:', req.body);
+  console.log('Archivo recibido:', req.file); // `req.file` contiene los detalles del archivo subido
+
   try {
-    const cvFile = req.file ? req.file.path : null; // Ruta del archivo CV en el servidor
-    console.log('Valor de req.file:', req.file);
-    const {
-      dni,
-      nombre,
-      correo,
-      telefono,
-      tipo_usuario,
-      apellido_paterno,
-      apellido_materno,
-      fecha_nacimiento,
-      area,
-      rol,
-      categoria,
-      fecha_ingreso,
-      situacion,
-      carrera,
-      instagram,
-      facebook,
-      linkedin
-    } = req.body;
-    console.log('Valor de cvFile:', cvFile);
-    // Validar campos
-    const validationErrors = [];
-    if (!dni || dni.length !== 8 || !/^\d{8}$/.test(dni)) {
-      validationErrors.push('El DNI debe ser de 8 dígitos numéricos y es obligatorio');
-    }
-    if (!nombre) {
-      validationErrors.push('El nombre es obligatorio');
-    }
-    // Validar los demás campos...
-
-    if (validationErrors.length > 0) {
-      return res.status(400).json({ message: 'Errores de validación', errors: validationErrors });
+    if (!dni || !nombre || !apellido_paterno || !apellido_materno || !correo) {
+      return res.status(400).json({ message: 'Faltan datos obligatorios' });
     }
 
-    // Verificar si el usuario ya existe en la base de datos
-    const userExistsQuery = await pool.query('SELECT * FROM usuarios WHERE dni = $1', [dni]);
-    if (userExistsQuery.rows.length > 0) {
+    // Verificar si el usuario ya existe
+    const existingUser = await pool.query('SELECT id FROM usuarios WHERE dni = $1', [dni]);
+    if (existingUser.rows.length > 0) {
       return res.status(400).json({ message: 'El usuario ya está registrado' });
     }
 
-    // Generar código de voluntario
-    const fechaIngresoYear = new Date(fecha_ingreso).getFullYear();
-    const categoriaAbbreviation = categoria.substring(0, 3).toUpperCase();
-    const areaAbbreviation = area.substring(0, 3).toUpperCase();
-    const codigo = `${fechaIngresoYear}_${categoriaAbbreviation}_${areaAbbreviation}`;
-
-    // Usar el DNI como clave inicial
+    // Generar el hash del DNI como contraseña inicial
     const hashedPassword = await bcrypt.hash(dni, 10);
 
-    // Leer el archivo CV como un búfer de bytes
-    let cvBuffer = null;
-    if (cvFile) {
-      cvBuffer = await readFileAsync(cvFile);
-      console.log('Contenido del CV como búfer de bytes:', cvBuffer); // Agregar esta línea para verificar el contenido de cvBuffer
+    // Insertar el usuario en la base de datos
+    const query = `
+      INSERT INTO usuarios (
+        dni, nombre, apellido_paterno, apellido_materno, correo, telefono, tipo_usuario, password
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8
+      ) RETURNING *;
+    `;
+    const values = [
+      dni, nombre, apellido_paterno, apellido_materno, correo, telefono, tipo_usuario, hashedPassword,
+    ];
+
+    const result = await pool.query(query, values);
+
+    // Si hay un archivo, puedes guardarlo en otra tabla o procesarlo aquí
+    if (req.file) {
+      console.log('Archivo subido con éxito:', req.file.path);
+      // Por ejemplo, guardar la ruta del archivo en la base de datos
     }
 
-    // Insertar el nuevo usuario en la base de datos
-    const insertQuery = await pool.query(
-      'INSERT INTO usuarios (dni, nombre, password, correo, telefono, tipo_usuario, estado_usuario, apellido_paterno, apellido_materno, fecha_nacimiento, area, rol, categoria, fecha_ingreso, grado_instruccion, carrera, instagram, facebook, linkedin, codigo, cv) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)',
-      [dni, nombre, hashedPassword, correo, telefono, tipo_usuario, true, apellido_paterno, apellido_materno, fecha_nacimiento, area, rol, categoria, fecha_ingreso, situacion, carrera, instagram, facebook, linkedin, codigo, cvBuffer]
-    );
-
-    // Redirigir a la pantalla de listado de usuarios con un mensaje de éxito y mostrar modal
-    res.json({ message: 'Registrado correctamente', modal: 'Registrado' });
-
+    res.status(201).json({ message: 'Usuario registrado correctamente', data: result.rows[0] });
   } catch (error) {
-    console.error('Error en el registro de usuario:', error);
-    res.status(500).json({ message: 'No es posible realizar el registro' });
+    console.error('Error al registrar usuario:', error);
+    res.status(500).json({ message: 'Error en el servidor al registrar el usuario' });
   }
 });
-
-
-// Endpoint para redirigir a la pantalla de listado de usuarios desde la pantalla de registro de usuarios
-app.get('/usuarios/listado', (req, res) => {
-  // Redirigir a la pantalla de listado de usuarios
-  res.redirect('/usuarios/listado');
-});
-
-//Endpoint para dar de alta o baja al usuario
-app.put('/usuarios/:id/estado', async (req, res) => {
-  const userId = req.params.id;
-  const { nuevoEstado } = req.body; // Nuevo estado del usuario (baja o alta)
-
-  try {
-    // Verificar si el usuario existe en la base de datos
-    const userQuery = await pool.query('SELECT * FROM usuarios WHERE id = $1', [userId]);
-    const usuario = userQuery.rows[0];
-
-    if (!usuario) {
-      return res.status(404).json({ message: 'Usuario no encontrado' });
-    }
-
-    let estadoUsuario;
-    // Determinar el nuevo estado del usuario
-    if (nuevoEstado === 'alta') {
-      estadoUsuario = true;
-    } else if (nuevoEstado === 'baja') {
-      estadoUsuario = false;
-    } else {
-      return res.status(400).json({ message: 'El nuevo estado debe ser "alta" o "baja"' });
-    }
-
-    // Actualizar el estado del usuario
-    await pool.query('UPDATE usuarios SET estado_usuario = $1 WHERE id = $2', [estadoUsuario, userId]);
-
-    // Enviar respuesta exitosae
-    res.json({ message: `El usuario ha sido marcado como "${nuevoEstado}"` });
-  } catch (error) {
-    console.error('Error al cambiar el estado del usuario:', error);
-    res.status(500).json({ message: 'No es posible cambiar el estado del usuario' });
-  }
-});
-
-// Endpoint para editar un usuario específico
-app.put('/usuarios/:id', async (req, res) => {
-  const userId = req.params.id;
-  const { nombre, apellido_paterno,apellido_materno,correo, telefono, tipo_usuario } = req.body;
-
-  try {
-    // Verificar si el usuario existe en la base de datos
-    const userQuery = await pool.query('SELECT * FROM usuarios WHERE id = $1', [userId]);
-    const usuario = userQuery.rows[0];
-
-    if (!usuario) {
-      return res.status(404).json({ message: 'Usuario no encontrado' });
-    }
-
-    // Actualizar la información del usuario
-    await pool.query(
-      'UPDATE usuarios SET nombre = $1, correo = $2, telefono = $3, tipo_usuario = $4,apellido_materno=$5,apellido_paterno=$6 WHERE id = $7',
-      [nombre, correo, telefono, tipo_usuario,apellido_materno,apellido_paterno, userId]
-    );
-
-    res.json({ message: 'Usuario actualizado correctamente' });
-  } catch (error) {
-    console.error('Error al editar usuario:', error);
-    res.status(500).json({ message: 'Error al editar usuario' });
-  }
-});
-
-app.put('/usuarios/:id/cambiar-contrasena', async (req, res) => {
-  const userId = req.params.id;
+app.put('/usuarios/:id/cambiar-contrasena', authenticateToken, async (req, res) => {
+  const userId = parseInt(req.params.id); // ID del usuario pasado en la URL
   const { contrasenaActual, nuevaContrasena } = req.body;
 
   try {
+    // Verificar si el usuario autenticado es el mismo que el que intenta cambiar la contraseña
+    if (req.user.id !== userId) {
+      return res.status(403).json({ message: 'No tiene permisos para cambiar esta contraseña' });
+    }
+
     // Verificar si el usuario existe
-    const userQuery = await pool.query('SELECT * FROM usuarios WHERE id = $1', [userId]);
+    const userQuery = await pool.query('SELECT password FROM usuarios WHERE id = $1', [userId]);
     const usuario = userQuery.rows[0];
 
     if (!usuario) {
@@ -505,24 +205,526 @@ app.put('/usuarios/:id/cambiar-contrasena', async (req, res) => {
     if (!contrasenaValida) {
       return res.status(401).json({ message: 'Contraseña actual incorrecta' });
     }
-    
+
+    // Generar el hash de la nueva contraseña
+    const nuevaContrasenaHash = await bcrypt.hash(nuevaContrasena, 10);
+
+    // Actualizar la contraseña
+    await pool.query('UPDATE usuarios SET password = $1 WHERE id = $2', [nuevaContrasenaHash, userId]);
+    res.json({ message: 'Contraseña actualizada correctamente' });
+  } catch (error) {
+    console.error('Error al cambiar contraseña:', error);
+    res.status(500).json({ message: 'Error al cambiar la contraseña' });
+  }
+});
+
+// Endpoint para redirigir a la pantalla de listado de usuarios desde la pantalla de registro de usuarios
+app.get('/usuarios/listado', (req, res) => {
+  // Redirigir a la pantalla de listado de usuarios
+  res.redirect('/usuarios/listado');
+});
+
+// Ruta para actualizar usuarios
+app.put('/usuarios/:id', async (req, res) => {
+  const { id } = req.params;
+  const fields = req.body;
+
+  try {
+    // Verificar si el usuario existe
+    const query = `SELECT * FROM usuarios WHERE id = $1`;
+    const result = await pool.query(query, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+
+    // Construir la consulta de actualización dinámicamente
+    const setFields = Object.keys(fields)
+      .map((key, index) => `${key} = $${index + 1}`)
+      .join(', ');
+    const values = Object.values(fields);
+
+    const updateQuery = `UPDATE usuarios SET ${setFields} WHERE id = $${values.length + 1}`;
+    await pool.query(updateQuery, [...values, id]);
+
+    res.json({ message: 'Usuario actualizado correctamente' });
+  } catch (error) {
+    console.error('Error al actualizar usuario:', error);
+    res.status(500).json({ message: 'Error al actualizar usuario' });
+  }
+});
+
+// *************SECCION VOLUNTARIOS ****************
+
+// Obtener CV de voluntarios
+app.get('/voluntarios/:id/cv', async (req, res) => {
+    const voluntarioId = req.params.id;
+    try {
+        const result = await pool.query('SELECT cv FROM voluntarios WHERE id = $1', [voluntarioId]);
+        if (result.rows.length === 0) return res.status(404).json({ message: 'Voluntario no encontrado o sin CV' });
+
+        const cvBuffer = result.rows[0].cv;
+        res.setHeader('Content-Type', 'application/pdf');
+        res.send(cvBuffer);
+    } catch (error) {
+        console.error('Error al obtener el CV del voluntario:', error);
+        res.status(500).json({ message: 'Error al obtener el CV del voluntario' });
+    }
+});
+
+app.get('/voluntarios/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query('SELECT * FROM voluntarios WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Voluntario no encontrado' });
+    }
+    res.status(200).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al obtener detalle del voluntario:', error);
+    res.status(500).json({ message: 'Error al obtener detalle del voluntario' });
+  }
+});
+
+app.put('/voluntarios/:id/cambiar-contrasena', authenticateToken, async (req, res) => {
+  const voluntarioId = parseInt(req.params.id); // ID del voluntario pasado en la URL
+  const { contrasenaActual, nuevaContrasena } = req.body;
+
+  try {
+    // Verificar si el voluntario autenticado es el mismo que intenta cambiar la contraseña
+    if (req.user.id !== voluntarioId) {
+      return res.status(403).json({ message: 'No tiene permisos para cambiar esta contraseña' });
+    }
+
+    // Verificar si el voluntario existe
+    const voluntarioQuery = await pool.query('SELECT password FROM voluntarios WHERE id = $1', [voluntarioId]);
+    const voluntario = voluntarioQuery.rows[0];
+
+    if (!voluntario) {
+      return res.status(404).json({ message: 'Voluntario no encontrado' });
+    }
+
+    // Verificar la contraseña actual
+    const contrasenaValida = await bcrypt.compare(contrasenaActual, voluntario.password);
+    if (!contrasenaValida) {
+      return res.status(401).json({ message: 'Contraseña actual incorrecta' });
+    }
+
+    // Generar el hash de la nueva contraseña
+    const nuevaContrasenaHash = await bcrypt.hash(nuevaContrasena, 10);
+
+    // Actualizar la contraseña en la base de datos
+    await pool.query('UPDATE voluntarios SET password = $1 WHERE id = $2', [nuevaContrasenaHash, voluntarioId]);
+
+    res.json({ message: 'Contraseña actualizada correctamente' });
+  } catch (error) {
+    console.error('Error al cambiar la contraseña del voluntario:', error);
+    res.status(500).json({ message: 'Error en el servidor al cambiar la contraseña del voluntario' });
+  }
+});
+
+app.get('/voluntarios', async (req, res) => {
+  try {
+    const query = `
+      SELECT *FROM voluntarios
+    `;
+    const result = await pool.query(query);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'No se encontraron voluntarios' });
+    }
+
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener voluntarios:', error);
+    res.status(500).json({ message: 'Error en el servidor al obtener los voluntarios' });
+  }
+});
+
+// Registro de voluntarios con CV
+app.post('/voluntarios/registro', upload.single('cv'), async (req, res) => {
+  const {
+    dni,
+    nombre,
+    apellido_paterno,
+    apellido_materno,
+    correo,
+    ciudad_residencia,
+    celular,
+    tipo_voluntariado,
+    fecha_ingreso,
+    fecha_nacimiento,
+    area,
+    rol,
+    categoria,
+    grado_instruccion,
+    carrera,
+    instagram,
+    facebook,
+    linkedin,
+    especializacion,
+    tema_especializacion,
+  } = req.body;
+
+  const cvFile = req.file ? req.file.path : null; // Ruta del archivo CV en el servidor
+
+  console.log('Datos recibidos:', req.body);
+  console.log('Archivo recibido:', req.file);
+
+  try {
+    // Validar campos obligatorios
+    const erroresValidacion = [];
+    if (!dni || dni.length !== 8 || !/^\d{8}$/.test(dni)) {
+      erroresValidacion.push('El DNI debe ser de 8 dígitos numéricos y es obligatorio.');
+    }
+    if (!nombre) erroresValidacion.push('El nombre es obligatorio.');
+    if (!apellido_paterno) erroresValidacion.push('El apellido paterno es obligatorio.');
+    if (!correo) erroresValidacion.push('El correo es obligatorio.');
+
+    if (erroresValidacion.length > 0) {
+      return res.status(400).json({ message: 'Errores de validación', errors: erroresValidacion });
+    }
+
+    // Verificar si el voluntario ya existe
+    const existingVoluntario = await pool.query('SELECT id FROM voluntarios WHERE dni = $1', [dni]);
+    if (existingVoluntario.rows.length > 0) {
+      return res.status(400).json({ message: 'El voluntario ya está registrado.' });
+    }
+
+    // Generar código de voluntario
+    const fechaIngresoYear = fecha_ingreso ? new Date(fecha_ingreso).getFullYear() : '0000';
+    const categoriaAbbreviation = categoria ? categoria.substring(0, 3).toUpperCase() : 'N/A';
+    const areaAbbreviation = area ? area.substring(0, 3).toUpperCase() : 'N/A';
+    const codigo = `${fechaIngresoYear}_${categoriaAbbreviation}_${areaAbbreviation}`;
+
+    // Leer el archivo CV como un búfer de bytes
+    let cvBuffer = null;
+    if (cvFile) {
+      cvBuffer = await readFileAsync(cvFile);
+    }
+
+    // Consulta de inserción
+    const query = `
+      INSERT INTO voluntarios (
+        dni, nombre, apellido_paterno, apellido_materno, correo, ciudad_residencia, celular,
+        tipo_voluntariado, fecha_ingreso, fecha_nacimiento, area, rol, categoria,
+        grado_instruccion, carrera, instagram, facebook, linkedin, codigo, cv, especializacion,
+        tema_especializacion, estado_voluntario
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+      ) RETURNING *;
+    `;
+
+    const values = [
+      dni,
+      nombre,
+      apellido_paterno,
+      apellido_materno,
+      correo,
+      ciudad_residencia || null,
+      celular || null,
+      tipo_voluntariado || null,
+      fecha_ingreso ? new Date(fecha_ingreso) : null,
+      fecha_nacimiento ? new Date(fecha_nacimiento) : null,
+      area || null,
+      rol || null,
+      categoria || null,
+      grado_instruccion || null,
+      carrera || null,
+      instagram || null,
+      facebook || null,
+      linkedin || null,
+      codigo,
+      cvBuffer,
+      especializacion || false,
+      tema_especializacion || null,
+      true, // estado_voluntario por defecto activo
+    ];
+
+    const result = await pool.query(query, values);
+
+    res.status(201).json({ message: 'Voluntario registrado correctamente', data: result.rows[0] });
+  } catch (error) {
+    console.error('Error al registrar voluntario:', error.message || error);
+    res.status(500).json({ message: 'Error en el servidor al registrar el voluntario.' });
+  }
+});
+
+app.get('/voluntarios/:id/cv', async (req, res) => {
+  const voluntarioId = req.params.id;
+  try {
+    const result = await pool.query('SELECT cv FROM voluntarios WHERE id = $1', [voluntarioId]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Voluntario no encontrado o sin CV' });
+    }
+
+    const cvBuffer = result.rows[0].cv;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.send(cvBuffer);
+  } catch (error) {
+    console.error('Error al obtener el CV del voluntario:', error);
+    res.status(500).json({ message: 'Error al obtener el CV del voluntario.' });
+  }
+});
+
+app.put('/voluntarios/:id', upload.single('cv'), async (req, res) => {
+  const voluntarioId = req.params.id;
+  const {
+    nombre,
+    apellido_paterno,
+    apellido_materno,
+    correo,
+    celular,
+    categoria,
+    grado_instruccion,
+    area,
+    rol,
+    carrera,
+  } = req.body;
+
+  const cvFile = req.file ? req.file.path : null;
+
+  try {
+    const query = `
+      UPDATE voluntarios
+      SET 
+        nombre = $1,
+        apellido_paterno = $2,
+        apellido_materno = $3,
+        correo = $4,
+        celular = $5,
+        categoria = $6,
+        grado_instruccion = $7,
+        area = $8,
+        rol = $9,
+        carrera = $10,
+        cv = COALESCE($11, cv)
+      WHERE id = $12
+      RETURNING *;
+    `;
+
+    const values = [
+      nombre,
+      apellido_paterno,
+      apellido_materno,
+      correo,
+      celular,
+      categoria,
+      grado_instruccion,
+      area,
+      rol,
+      carrera,
+      cvFile ? await readFileAsync(cvFile) : null,
+      voluntarioId,
+    ];
+
+    const result = await pool.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Voluntario no encontrado.' });
+    }
+
+    res.status(200).json({ message: 'Voluntario actualizado correctamente', data: result.rows[0] });
+  } catch (error) {
+    console.error('Error al actualizar voluntario:', error);
+    res.status(500).json({ message: 'Error en el servidor al actualizar el voluntario.' });
+  }
+});
+
+// Ruta para actualizar voluntarios
+app.put('/voluntarios/:id', async (req, res) => {
+  const { id } = req.params;
+  const fields = req.body; // Datos enviados en el cuerpo
+  const cvFile = req.file ? req.file.path : null; // Ruta del archivo si se envía
+
+  try {
+    // Verificar si el voluntario existe
+    const query = `SELECT * FROM voluntarios WHERE id = $1`;
+    const result = await pool.query(query, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Voluntario no encontrado' });
+    }
+
+    // Construir la consulta de actualización dinámicamente
+    const setFields = Object.keys(fields)
+      .map((key, index) => `${key} = $${index + 1}`)
+      .join(', ');
+    const values = Object.values(fields);
+
+    if (cvFile) {
+      setFields += `, cv = $${values.length + 1}`;
+      values.push(await readFileAsync(cvFile));
+    }
+
+    const updateQuery = `UPDATE voluntarios SET ${setFields} WHERE id = $${values.length + 1}`;
+    await pool.query(updateQuery, [...values, id]);
+
+    res.json({ message: 'Voluntario actualizado correctamente' });
+  } catch (error) {
+    console.error('Error al actualizar voluntario:', error);
+    res.status(500).json({ message: 'Error al actualizar voluntario' });
+  }
+});
+
+app.put('/voluntarios/:id/estado', async (req, res) => {
+  const voluntarioId = req.params.id;
+  const { nuevoEstado } = req.body;
+
+  console.log(`Cambiando estado del voluntario ID ${voluntarioId} a ${nuevoEstado}`);
+
+  try {
+    const result = await pool.query(
+      'UPDATE voluntarios SET estado_voluntario = $1 WHERE id = $2 RETURNING *',
+      [nuevoEstado === 'Activo', voluntarioId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Voluntario no encontrado' });
+    }
+
+    res.json({ message: 'Estado del voluntario actualizado correctamente', data: result.rows[0] });
+  } catch (error) {
+    console.error('Error al cambiar el estado del voluntario:', error);
+    res.status(500).json({ message: 'Error en el servidor al cambiar el estado del voluntario' });
+  }
+});
+
+
+
+
+// Endpoint para cambiar la contraseña de un usuario o voluntario
+app.put('/:tabla/:id/cambiar-contrasena', async (req, res) => {
+  const { tabla, id } = req.params; // La tabla puede ser "usuarios" o "voluntarios"
+  const { contrasenaActual, nuevaContrasena } = req.body;
+
+  if (!['usuarios', 'voluntarios'].includes(tabla)) {
+    return res.status(400).json({ message: 'Tabla no válida. Use usuarios o voluntarios.' });
+  }
+
+  try {
+    // Verificar si el registro existe
+    const query = `SELECT * FROM ${tabla} WHERE id = $1`;
+    const result = await pool.query(query, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: `${tabla.slice(0, -1)} no encontrado` });
+    }
+
+    const usuario = result.rows[0];
+
+    // Verificar la contraseña actual
+    const contrasenaValida = await bcrypt.compare(contrasenaActual, usuario.password);
+    if (!contrasenaValida) {
+      return res.status(401).json({ message: 'Contraseña actual incorrecta' });
+    }
 
     // Hashear la nueva contraseña
     const nuevaContrasenaHash = await bcrypt.hash(nuevaContrasena, 10);
 
     // Actualizar la contraseña en la base de datos
-    await pool.query(
-      'UPDATE usuarios SET password = $1 WHERE id = $2',
-      [nuevaContrasenaHash, userId]
-    );
+    const updateQuery = `UPDATE ${tabla} SET password = $1 WHERE id = $2`;
+    await pool.query(updateQuery, [nuevaContrasenaHash, id]);
 
     res.json({ message: 'Contraseña actualizada correctamente' });
   } catch (error) {
-    console.error('Error al actualizar la contraseña:', error);
-    res.status(500).json({ message: 'Error al actualizar la contraseña' });
+    console.error(`Error al actualizar la contraseña del ${tabla.slice(0, -1)}:`, error);
+    res.status(500).json({ message: `Error al actualizar la contraseña del ${tabla.slice(0, -1)}` });
   }
 });
 
+app.get('/voluntarios', async (req, res) => {
+  try {
+      const result = await pool.query("select *from voluntarios'");
+      res.json(result.rows);
+  } catch (error) {
+      console.error('Error al obtener voluntarios:', error);
+      res.status(500).json({ message: 'Error en el servidor al obtener voluntarios' });
+  }
+});
+
+// Obtener historial de voluntariados para un voluntario
+app.get('/voluntarios/:id/historial', async (req, res) => {
+  const { id } = req.params; // Obtén el ID del voluntario de los parámetros de la URL
+
+  try {
+    const query = `
+      SELECT 
+        v.id AS id_voluntariado,
+        v.nombre,
+        CONCAT(vol.nombre, ' ', vol.apellido_paterno, ' ', vol.apellido_materno) AS nombre_completo,
+        v.lugar,
+        v.descripcion,
+        va.fecha_asignacion
+      FROM 
+        voluntariados v
+      JOIN 
+        voluntarios_asignados va ON v.id = va.id_voluntariado
+      JOIN 
+        voluntarios vol ON va.id_voluntario = vol.id
+      WHERE 
+        vol.id = $1; -- Filtra por el ID del voluntario
+    `;
+
+    // Ejecuta la consulta SQL
+    const result = await pool.query(query, [id]);
+
+    // Si no se encuentran resultados
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'No se encontraron voluntariados para este voluntario' });
+    }
+
+    // Si se encuentran resultados, devolverlos
+    res.json(result.rows);
+  } catch (error) {
+    // Manejo de errores
+    console.error('Error al obtener historial:', error);
+    res.status(500).json({ message: 'Error en el servidor al obtener el historial' });
+  }
+});
+
+// Obtener feedback de un voluntariado específico
+app.get('/voluntarios/:id/feedback', async (req, res) => {
+  const { id } = req.params; // ID del voluntariado
+
+  try {
+    const query = `
+      SELECT 
+        fb.id AS feedback_id,
+        fb.fecha AS feedback_fecha,
+        fb.reconocimiento,
+        fb.oportunidad_mejora,
+        fb.adicional,
+        fb.mentor
+      FROM feedback fb
+      WHERE fb.id_voluntariado = $1
+      ORDER BY fb.fecha;
+    `;
+
+    // Ejecuta la consulta SQL
+    const result = await pool.query(query, [id]);
+
+    // Si no se encuentran resultados
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'No se encontró feedback para este voluntariado' });
+    }
+
+    // Si se encuentran resultados, devolverlos
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener feedback:', error);
+    res.status(500).json({ message: 'Error en el servidor al obtener el feedback' });
+  }
+});
+
+
+
+
+
+
+
+
+// *************SECCION VARIABLES DEL SISTEMA ****************
 
 app.get('/variables-sistema', async (req, res) => {
   try {
@@ -558,11 +760,6 @@ app.get('/variables-sistema/valores', async (req, res) => {
       res.status(500).json({ message: 'Error en el servidor al obtener los valores' });
   }
 });
-
-
-
-
-
 
 app.post('/variables-sistema/registro', async (req, res) => {
   const { nombre,descripcion, valor1, valor2, valor3 } = req.body;
@@ -666,132 +863,9 @@ app.put('/variables-sistema/:id', async (req, res) => {
   }
 });
 
-app.get('/voluntarios', async (req, res) => {
-  try {
-      const result = await pool.query("select *from usuarios WHERE tipo_usuario='VOLUNTARIO'");
-      res.json(result.rows);
-  } catch (error) {
-      console.error('Error al obtener voluntarios:', error);
-      res.status(500).json({ message: 'Error en el servidor al obtener voluntarios' });
-  }
-});
 
 
-
-// Obtener historial de voluntariados para un voluntario
-// app.get('/voluntarios/:id/historial', async (req, res) => {
-//   const { id } = req.params; // Obtén el ID de los parámetros de la URL
-//   try {
-//     const query = `
-//       SELECT 
-//         v.id,
-//         u.nombre, ' ', u.apellido_paterno, ' ', u.apellido_materno,
-//         v.lugar,
-//         v.descripcion
-//       FROM 
-//         voluntariados v
-//       JOIN 
-//         usuarios u ON v.id_usuario = u.id
-//       WHERE 
-//         u.id = $1 AND u.tipo_usuario = 'VOLUNTARIO';
-//     `;
-    
-//     // Ejecuta la consulta SQL
-//     const result = await pool.query(query, [id]);
-
-//     // Si no se encuentran resultados
-//     if (result.rows.length === 0) {
-//       return res.status(404).json({ message: 'No se encontraron voluntariados' });
-//     }
-
-//     // Si se encuentran resultados, devolverlos
-//     res.json(result.rows);
-//   } catch (error) {
-//     // Manejo de errores
-//     console.error('Error al obtener historial:', error);
-//     res.status(500).json({ message: 'Error en el servidor al obtener el historial' });
-//   }
-// });
-
-app.get('/voluntarios/:id/historial', async (req, res) => {
-  const { id } = req.params; // Obtén el ID del voluntario de los parámetros de la URL
-  try {
-    const query = `
-      SELECT 
-        v.id AS id_voluntariado,
-        v.nombre,
-        CONCAT(u.nombre, ' ', u.apellido_paterno, ' ', u.apellido_materno) AS nombre_completo,
-        v.lugar,
-        v.descripcion,
-        va.fecha_asignacion
-      FROM 
-        voluntariados v
-      JOIN 
-        voluntarios_asignados va ON v.id = va.id_voluntariado
-      JOIN 
-        usuarios u ON va.id_voluntario = u.id
-      WHERE 
-        u.id = $1; -- Filtra por el ID del voluntario
-    `;
-    
-    // Ejecuta la consulta SQL
-    const result = await pool.query(query, [id]);
-    console.log(result);
-    // Si no se encuentran resultados
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'No se encontraron voluntariados para este voluntario' });
-    }
-
-    // Si se encuentran resultados, devolverlos
-    res.json(result.rows);
-  } catch (error) {
-    // Manejo de errores
-    console.error('Error al obtener historial:', error);
-    res.status(500).json({ message: 'Error en el servidor al obtener el historial' });
-  }
-});
-
-
-
-function verificarVoluntario(req, res, next) {
-  const { tipo_usuario } = req.user; // Supone que ya tienes autenticación implementada
-
-  if (tipo_usuario !== 'VOLUNTARIO') {
-    return res.status(403).json({ message: 'Acceso Restringido' });
-  }
-  next();
-}
-
-app.get('/voluntarios/:id/feedback', async (req, res) => {
-  const { id } = req.params; // ID del voluntariado
-  try {
-    const query = `
-      SELECT 
-        fb.id AS feedback_id,
-        fb.fecha AS feedback_fecha,
-        fb.reconocimiento,
-        fb.oportunidad_mejora,
-        fb.adicional,
-        fb.mentor
-      FROM feedback fb
-      WHERE fb.id_voluntariado = $1
-      ORDER BY fb.fecha;
-    `;
-
-    const result = await pool.query(query, [id]);
-    console.log(result.rows)
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'No se encontró feedback para este voluntariado' });
-    }
-
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error al obtener feedback:', error);
-    res.status(500).json({ message: 'Error en el servidor al obtener el feedback' });
-  }
-});
-
-
+// *************SECCION VOLUTARIADOS****************
 
 function authenticateToken(req, res, next) {
   const token = req.get('Authorization')?.split(' ')[1];
@@ -820,15 +894,7 @@ function authenticateToken(req, res, next) {
   });
 }
 
-
-
-
-
-
 module.exports = authenticateToken;
-
-
-
 
 app.get('/voluntariados', authenticateToken, async (req, res) => {
   const rol  = req.user.tipo_usuario; // Asegúrate de que req.user esté correctamente poblado
@@ -935,8 +1001,6 @@ app.post('/voluntariados', authenticateToken, async (req, res) => {
     res.status(500).json({ message: 'Error en el servidor al crear voluntariado', error: error.message });
   }
 });
-
-
 // Obtener un voluntariado por ID
 app.get('/voluntariados/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
@@ -1042,6 +1106,36 @@ app.put('/voluntariados/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ message: 'Error del servidor', error: error.message });
   }
 });
+// Endpoint para cambiar el estado de un voluntariado
+app.put('/voluntariados/:id/estado', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { estado_voluntariado } = req.body; // Usar el nuevo nombre de columna
+
+  if (!estado_voluntariado) {
+    return res.status(400).json({ message: 'Campo estado_voluntariado es obligatorio' });
+  }
+
+  try {
+    const query = `
+      UPDATE voluntariados
+      SET estado_voluntariado = $1
+      WHERE id = $2
+      RETURNING *;
+    `;
+    const values = [estado_voluntariado, id];
+
+    const result = await pool.query(query, values);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Voluntariado no encontrado' });
+    }
+
+    res.status(200).json({ message: 'Estado actualizado correctamente', data: result.rows[0] });
+  } catch (error) {
+    console.error('Error al actualizar estado del voluntariado:', error);
+    res.status(500).json({ message: 'Error del servidor', error: error.message });
+  }
+});
 
 // Endpoint para cambiar el estado de un voluntariado
 app.put('/voluntariados/:id/estado', authenticateToken, async (req, res) => {
@@ -1074,15 +1168,13 @@ app.put('/voluntariados/:id/estado', authenticateToken, async (req, res) => {
   }
 });
 
-
 app.get('/voluntariados/voluntarios/no-asignados', authenticateToken, async (req, res) => {
   try {
     const query = `
-      SELECT u.id, CONCAT(u.nombre, ' ', u.apellido_paterno, ' ', u.apellido_materno) AS nombre_completo
-      FROM usuarios u
-      LEFT JOIN voluntarios_asignados va ON u.id = va.id_voluntario
-      WHERE u.tipo_usuario = 'VOLUNTARIO'
-        AND va.id_voluntariado IS NULL;
+      SELECT v.id, CONCAT(v.nombre, ' ', v.apellido_paterno, ' ', v.apellido_materno) AS nombre_completo
+      FROM voluntarios v
+      LEFT JOIN voluntarios_asignados va ON v.id = va.id_voluntario
+      WHERE va.id_voluntariado IS NULL;
     `;
     const result = await pool.query(query);
     res.status(200).json(result.rows);
@@ -1091,7 +1183,6 @@ app.get('/voluntariados/voluntarios/no-asignados', authenticateToken, async (req
     res.status(500).json({ message: 'Error al obtener voluntarios sin asignación' });
   }
 });
-
 
 app.post('/voluntariados/voluntarios/asignar', authenticateToken, async (req, res) => {
   const { id_voluntariado, id_voluntario } = req.body;
@@ -1114,6 +1205,85 @@ app.post('/voluntariados/voluntarios/asignar', authenticateToken, async (req, re
     res.status(500).json({ message: 'Error al asignar voluntario', error: error.message });
   }
 });
+
+// Obtener voluntarios asignados a un voluntariado
+app.get('/voluntariados/:voluntariadoId/voluntarios', authenticateToken, async (req, res) => {
+  const { voluntariadoId } = req.params;
+
+  try {
+    const query = `
+      SELECT 
+        v.id AS id_voluntario,
+        v.nombre,
+        v.apellido_paterno,
+        v.apellido_materno,
+        va.fecha_asignacion
+      FROM 
+        voluntarios_asignados va
+      JOIN 
+        voluntarios v ON va.id_voluntario = v.id
+      WHERE 
+        va.id_voluntariado = $1
+    `;
+
+    const result = await pool.query(query, [voluntariadoId]);
+    console.log(result);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'No hay voluntarios asignados para este voluntariado' });
+    }
+
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener voluntarios asignados:', error);
+    res.status(500).json({ message: 'Error en el servidor al obtener los voluntarios asignados' });
+  }
+});
+
+// Desasignar un voluntario
+app.delete('/voluntariados/:voluntariadoId/voluntarios/:voluntarioId', authenticateToken, async (req, res) => {
+  const { voluntariadoId, voluntarioId } = req.params;
+
+  try {
+    const query = `
+      DELETE FROM voluntarios_asignados
+      WHERE id_voluntariado = $1 AND id_voluntario = $2
+    `;
+    const result = await pool.query(query, [voluntariadoId, voluntarioId]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'No se encontró el registro para desasignar' });
+    }
+
+    res.status(200).json({ message: 'Voluntario desasignado con éxito' });
+  } catch (error) {
+    console.error('Error al desasignar voluntario:', error);
+    res.status(500).json({ message: 'Error en el servidor al desasignar voluntario' });
+  }
+});
+
+app.get('/voluntarios/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query(
+      "SELECT * FROM voluntarios WHERE id = $1",
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Voluntario no encontrado' });
+    }
+
+    res.status(200).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al obtener detalle del voluntario:', error);
+    res.status(500).json({ message: 'Error al obtener detalle del voluntario' });
+  }
+});
+
+
+
 
 
 
