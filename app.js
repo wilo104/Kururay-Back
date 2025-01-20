@@ -9,6 +9,7 @@ const multer = require('multer');
 const fs = require('fs');
 const util = require('util');
 
+
 const app = express();
 const port = 3000;
 
@@ -341,7 +342,8 @@ app.get('/voluntarios', async (req, res) => {
   }
 });
 
-// Registro de voluntarios con CV
+
+
 app.post('/voluntarios/registro', upload.single('cv'), async (req, res) => {
   const {
     dni,
@@ -391,6 +393,9 @@ app.post('/voluntarios/registro', upload.single('cv'), async (req, res) => {
       return res.status(400).json({ message: 'El voluntario ya está registrado.' });
     }
 
+    // Generar el hash del DNI como contraseña inicial
+    const hashedPassword = await bcrypt.hash(dni, 10);
+
     // Generar código de voluntario
     const fechaIngresoYear = fecha_ingreso ? new Date(fecha_ingreso).getFullYear() : '0000';
     const categoriaAbbreviation = categoria ? categoria.substring(0, 3).toUpperCase() : 'N/A';
@@ -409,9 +414,9 @@ app.post('/voluntarios/registro', upload.single('cv'), async (req, res) => {
         dni, nombre, apellido_paterno, apellido_materno, correo, ciudad_residencia, celular,
         tipo_voluntariado, fecha_ingreso, fecha_nacimiento, area, rol, categoria,
         grado_instruccion, carrera, instagram, facebook, linkedin, codigo, cv, especializacion,
-        tema_especializacion, estado_voluntario
+        tema_especializacion, estado_voluntario, password
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
       ) RETURNING *;
     `;
 
@@ -439,6 +444,7 @@ app.post('/voluntarios/registro', upload.single('cv'), async (req, res) => {
       especializacion || false,
       tema_especializacion || null,
       true, // estado_voluntario por defecto activo
+      hashedPassword, // Contraseña encriptada
     ];
 
     const result = await pool.query(query, values);
@@ -449,6 +455,7 @@ app.post('/voluntarios/registro', upload.single('cv'), async (req, res) => {
     res.status(500).json({ message: 'Error en el servidor al registrar el voluntario.' });
   }
 });
+
 
 app.get('/voluntarios/:id/cv', async (req, res) => {
   const voluntarioId = req.params.id;
@@ -1022,6 +1029,104 @@ app.get('/voluntariados/:id', authenticateToken, async (req, res) => {
   }
 });
 
+
+app.get('/voluntariados/:id/voluntarios', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const query = `
+      SELECT 
+        v.id,
+        v.dni,
+        v.nombre,
+        v.apellido_paterno,
+        v.apellido_materno,
+        v.correo,
+        v.celular,
+        v.ciudad_residencia,
+        v.rol,
+        v.area,
+        v.categoria,
+        v.grado_instruccion,
+        v.carrera
+      FROM voluntarios v
+      INNER JOIN voluntarios_asignados va ON va.id_voluntario = v.id
+      WHERE va.id_voluntariado = $1
+    `;
+    const result = await pool.query(query, [id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener voluntarios asignados:', error);
+    res.status(500).json({ message: 'Error en el servidor' });
+  }
+});
+
+
+app.get('/voluntariados/:id/evidencias', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const query = `
+      SELECT id, fecha_evidencia, descripcion
+      FROM evidencias
+      WHERE voluntariado_id = $1
+    `;
+    const result = await pool.query(query, [id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener evidencias:', error);
+    res.status(500).json({ message: 'Error en el servidor' });
+  }
+});
+
+
+app.get('/voluntariados/:id/asistencias', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const query = `
+      SELECT id, fecha_asistencia, total_asistentes
+      FROM asistencias
+      WHERE voluntariado_id = $1
+    `;
+    const result = await pool.query(query, [id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener asistencias:', error);
+    res.status(500).json({ message: 'Error en el servidor' });
+  }
+});
+
+app.get('/voluntariados/:id/evidencias', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const query = `
+      SELECT id, fecha_evidencia, descripcion
+      FROM evidencias
+      WHERE voluntariado_id = $1
+    `;
+    const result = await pool.query(query, [id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener evidencias:', error);
+    res.status(500).json({ message: 'Error en el servidor' });
+  }
+});
+app.get('/voluntariados/:id/asistencias', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const query = `
+      SELECT id, fecha_asistencia, total_asistentes
+      FROM asistencias
+      WHERE voluntariado_id = $1
+    `;
+    const result = await pool.query(query, [id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener asistencias:', error);
+    res.status(500).json({ message: 'Error en el servidor' });
+  }
+});
+
+
+
 // Actualizar un voluntariado
 app.put('/voluntariados/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
@@ -1282,9 +1387,192 @@ app.get('/voluntarios/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Obtener feedback de un voluntario dentro de un voluntariado
+app.get('/voluntarios/:voluntariadoId/:voluntarioId/feedback', authenticateToken, async (req, res) => {
+  const { voluntariadoId, voluntarioId } = req.params;
+
+  try {
+    const query = `
+      SELECT * 
+      FROM feedback 
+      WHERE id_voluntariado = $1 AND id_voluntario = $2
+    `;
+    const values = [voluntariadoId, voluntarioId];
+    
+    const result = await pool.query(query, values);
+    console.log(result);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'No se encontró feedback para el voluntario en este voluntariado' });
+    }
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener feedback:', error);
+    res.status(500).json({ message: 'Error en el servidor al obtener feedback' });
+  }
+});
+
+//******************* BENEFACTORES ************************** */
+// Registrar benefactor
+app.post('/benefactores', authenticateToken, async (req, res) => {
+  const {
+    nombre,
+    tipo,
+    nombre_contacto,
+    celular_contacto,
+    direccion,
+    razon_social,
+    ruc,
+  } = req.body;
+
+  try {
+    const query = `
+      INSERT INTO benefactores (nombre, tipo, nombre_contacto, celular_contacto, direccion, razon_social, ruc)
+      VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *;
+    `;
+    const values = [
+      nombre,
+      tipo,
+      nombre_contacto,
+      celular_contacto,
+      direccion,
+      razon_social,
+      ruc,
+    ];
+
+    const result = await pool.query(query, values);
+
+    res.status(201).json({
+      message: 'Benefactor registrado correctamente',
+      benefactor: result.rows[0],
+    });
+  } catch (error) {
+    console.error('Error al registrar benefactor:', error);
+
+    if (error.code === '23505') {
+      // Código de error para valores únicos duplicados
+      return res
+        .status(400)
+        .json({ message: 'El RUC ya está registrado.' });
+    }
+
+    res.status(500).json({
+      message: 'Error en el servidor al registrar benefactor',
+    });
+  }
+});
 
 
+// Obtener lista de benefactores
+app.get('/benefactores', authenticateToken, async (req, res) => {
+  try {
+    const query = `SELECT * FROM benefactores ORDER BY created_at DESC;`;
+    const result = await pool.query(query);
 
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener benefactores:', error);
+    res.status(500).json({
+      message: 'Error en el servidor al obtener benefactores',
+    });
+  }
+});
+
+
+// Obtener detalle de un benefactor
+app.get('/benefactores/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const query = `SELECT * FROM benefactores WHERE id = $1;`;
+    const result = await pool.query(query, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Benefactor no encontrado' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al obtener benefactor:', error);
+    res.status(500).json({
+      message: 'Error en el servidor al obtener benefactor',
+    });
+  }
+});
+// Actualizar benefactor
+app.put('/benefactores/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const {
+    nombre,
+    tipo,
+    nombre_contacto,
+    celular_contacto,
+    direccion,
+    razon_social,
+    ruc,
+  } = req.body;
+
+  try {
+    const query = `
+      UPDATE benefactores
+      SET nombre = $1,
+          tipo = $2,
+          nombre_contacto = $3,
+          celular_contacto = $4,
+          direccion = $5,
+          razon_social = $6,
+          ruc = $7,
+          updated_at = NOW()
+      WHERE id = $8 RETURNING *;
+    `;
+    const values = [
+      nombre,
+      tipo,
+      nombre_contacto,
+      celular_contacto,
+      direccion,
+      razon_social,
+      ruc,
+      id,
+    ];
+
+    const result = await pool.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Benefactor no encontrado' });
+    }
+
+    res.json({
+      message: 'Benefactor actualizado correctamente',
+      benefactor: result.rows[0],
+    });
+  } catch (error) {
+    console.error('Error al actualizar benefactor:', error);
+    res.status(500).json({
+      message: 'Error en el servidor al actualizar benefactor',
+    });
+  }
+});
+// Eliminar benefactor
+app.delete('/benefactores/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const query = `DELETE FROM benefactores WHERE id = $1 RETURNING *;`;
+    const result = await pool.query(query, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Benefactor no encontrado' });
+    }
+
+    res.json({ message: 'Benefactor eliminado correctamente' });
+  } catch (error) {
+    console.error('Error al eliminar benefactor:', error);
+    res.status(500).json({
+      message: 'Error en el servidor al eliminar benefactor',
+    });
+  }
+});
 
 
 app.listen(port, () => {
