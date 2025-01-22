@@ -36,6 +36,73 @@ const upload = multer({ storage });
 const readFileAsync = util.promisify(fs.readFile);
 
 // Login
+// app.post('/login', async (req, res) => {
+//   const { dni, password } = req.body;
+
+//   try {
+//     if (!dni || !password) {
+//       return res.status(400).json({ message: 'Ingrese DNI y contraseña' });
+//     }
+
+//     // Consultar en la tabla usuarios
+//     let userQuery = await pool.query('SELECT id, dni, password, tipo_usuario, estado_usuario FROM usuarios WHERE dni = $1', [dni]);
+
+//     if (userQuery.rows.length === 0) {
+//       // Si no se encuentra en `usuarios`, buscar en `voluntarios`
+//       userQuery = await pool.query('SELECT id, dni, password FROM voluntarios WHERE dni = $1', [dni]);
+
+//       if (userQuery.rows.length === 0) {
+//         return res.status(401).json({ message: 'Usuario o contraseña incorrectos' });
+//       }
+
+//       const storedPasswordHash = userQuery.rows[0].password;
+
+//       // Comparar contraseñas
+//       if (!(await bcrypt.compare(password, storedPasswordHash))) {
+//         return res.status(401).json({ message: 'Usuario o contraseña incorrectos' });
+//       }
+
+//       // Generar token JWT para voluntario
+//       const token = jwt.sign(
+//         { id: userQuery.rows[0].id, dni: userQuery.rows[0].dni, tipo_usuario: 'VOLUNTARIO' },
+//         process.env.JWT_SECRET || 'tu_secreto_secreto'
+//       );
+
+//       return res.json({
+//         token,
+//         tipo_usuario: 'VOLUNTARIO',
+//         id: userQuery.rows[0].id,
+//       });
+//     }
+
+//     // Si el usuario está en la tabla `usuarios`, verificar contraseña
+//     const storedPasswordHash = userQuery.rows[0].password;
+
+//     if (!(await bcrypt.compare(password, storedPasswordHash))) {
+//       return res.status(401).json({ message: 'Usuario o contraseña incorrectos' });
+//     }
+
+//     if (!userQuery.rows[0].estado_usuario) {
+//       return res.status(403).json({ message: 'Cuenta inactiva. Contacte al administrador.' });
+//     }
+
+//     // Generar token JWT para usuario
+//     const token = jwt.sign(
+//       { id: userQuery.rows[0].id, dni: userQuery.rows[0].dni, tipo_usuario: userQuery.rows[0].tipo_usuario },
+//       process.env.JWT_SECRET || 'tu_secreto_secreto'
+//     );
+
+//     res.json({
+//       token,
+//       tipo_usuario: userQuery.rows[0].tipo_usuario,
+//       id: userQuery.rows[0].id,
+//     });
+//   } catch (error) {
+//     console.error('Error en la autenticación:', error);
+//     res.status(500).json({ message: 'Error en el servidor durante la autenticación' });
+//   }
+// });
+
 app.post('/login', async (req, res) => {
   const { dni, password } = req.body;
 
@@ -45,11 +112,21 @@ app.post('/login', async (req, res) => {
     }
 
     // Consultar en la tabla usuarios
-    let userQuery = await pool.query('SELECT id, dni, password, tipo_usuario, estado_usuario FROM usuarios WHERE dni = $1', [dni]);
+    let userQuery = await pool.query(
+      `SELECT id, dni, password, tipo_usuario, estado_usuario, 
+      (nombre || ' ' || apellido_paterno || ' ' || apellido_materno) AS nombre_completo 
+      FROM usuarios WHERE dni = $1`,
+      [dni]
+    );
 
     if (userQuery.rows.length === 0) {
       // Si no se encuentra en `usuarios`, buscar en `voluntarios`
-      userQuery = await pool.query('SELECT id, dni, password FROM voluntarios WHERE dni = $1', [dni]);
+      userQuery = await pool.query(
+        `SELECT id, dni, password, 
+        (nombre || ' ' || apellido_paterno || ' ' || apellido_materno) AS nombre_completo 
+        FROM voluntarios WHERE dni = $1`,
+        [dni]
+      );
 
       if (userQuery.rows.length === 0) {
         return res.status(401).json({ message: 'Usuario o contraseña incorrectos' });
@@ -64,7 +141,11 @@ app.post('/login', async (req, res) => {
 
       // Generar token JWT para voluntario
       const token = jwt.sign(
-        { id: userQuery.rows[0].id, dni: userQuery.rows[0].dni, tipo_usuario: 'VOLUNTARIO' },
+        {
+          id: userQuery.rows[0].id,
+          dni: userQuery.rows[0].dni,
+          tipo_usuario: 'VOLUNTARIO',
+        },
         process.env.JWT_SECRET || 'tu_secreto_secreto'
       );
 
@@ -72,6 +153,7 @@ app.post('/login', async (req, res) => {
         token,
         tipo_usuario: 'VOLUNTARIO',
         id: userQuery.rows[0].id,
+        nombre_completo: userQuery.rows[0].nombre_completo, // Nombre completo del voluntario
       });
     }
 
@@ -88,7 +170,11 @@ app.post('/login', async (req, res) => {
 
     // Generar token JWT para usuario
     const token = jwt.sign(
-      { id: userQuery.rows[0].id, dni: userQuery.rows[0].dni, tipo_usuario: userQuery.rows[0].tipo_usuario },
+      {
+        id: userQuery.rows[0].id,
+        dni: userQuery.rows[0].dni,
+        tipo_usuario: userQuery.rows[0].tipo_usuario,
+      },
       process.env.JWT_SECRET || 'tu_secreto_secreto'
     );
 
@@ -96,12 +182,19 @@ app.post('/login', async (req, res) => {
       token,
       tipo_usuario: userQuery.rows[0].tipo_usuario,
       id: userQuery.rows[0].id,
+      nombre_completo: userQuery.rows[0].nombre_completo, // Nombre completo del usuario
     });
   } catch (error) {
     console.error('Error en la autenticación:', error);
     res.status(500).json({ message: 'Error en el servidor durante la autenticación' });
   }
 });
+
+
+
+
+
+
 
 // *************SECCION USUARIOS****************
 
@@ -692,19 +785,22 @@ app.get('/voluntarios/:id/historial', async (req, res) => {
 
 // Obtener feedback de un voluntariado específico
 app.get('/voluntarios/:id/feedback', async (req, res) => {
-  const { id } = req.params; // ID del voluntariado
+  const { id } = req.params; // ID del voluntario
 
   try {
     const query = `
       SELECT 
         fb.id AS feedback_id,
         fb.fecha AS feedback_fecha,
-        fb.reconocimiento,
-        fb.oportunidad_mejora,
+        fb.tipo,
         fb.adicional,
-        fb.mentor
+        fb.mentor,
+        v.id AS voluntariado_id,
+        v.nombre AS voluntariado_nombre
       FROM feedback fb
-      WHERE fb.id_voluntariado = $1
+      JOIN voluntarios_asignados va ON fb.id_voluntario = va.id_voluntario
+      JOIN voluntariados v ON va.id_voluntariado = v.id
+      WHERE fb.id_voluntario = $1
       ORDER BY fb.fecha;
     `;
 
@@ -713,7 +809,7 @@ app.get('/voluntarios/:id/feedback', async (req, res) => {
 
     // Si no se encuentran resultados
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'No se encontró feedback para este voluntariado' });
+      return res.status(404).json({ message: 'No se encontró feedback para este voluntario' });
     }
 
     // Si se encuentran resultados, devolverlos
@@ -1060,7 +1156,7 @@ app.get('/voluntariados/:id/voluntarios', authenticateToken, async (req, res) =>
   }
 });
 
-
+/****************EVIDENCIAS FLUJO VOLUNTARIADO************* */
 app.get('/voluntariados/:id/evidencias', authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
@@ -1077,45 +1173,142 @@ app.get('/voluntariados/:id/evidencias', authenticateToken, async (req, res) => 
   }
 });
 
-
-app.get('/voluntariados/:id/asistencias', authenticateToken, async (req, res) => {
+app.get('/evidencias/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
     const query = `
-      SELECT id, fecha_asistencia, total_asistentes
-      FROM asistencias
-      WHERE voluntariado_id = $1
-    `;
-    const result = await pool.query(query, [id]);
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error al obtener asistencias:', error);
-    res.status(500).json({ message: 'Error en el servidor' });
-  }
-});
-
-app.get('/voluntariados/:id/evidencias', authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  try {
-    const query = `
-      SELECT id, fecha_evidencia, descripcion
+      SELECT id, fecha_evidencia, descripcion, incidentes, asistencia_mentores,asistencia_voluntarios ,porcentaje_participacion
       FROM evidencias
-      WHERE voluntariado_id = $1
+      WHERE id = $1
     `;
     const result = await pool.query(query, [id]);
-    res.json(result.rows);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Evidencia no encontrada' });
+    }
+    res.json(result.rows[0]);
   } catch (error) {
-    console.error('Error al obtener evidencias:', error);
+    console.error('Error al obtener la evidencia:', error);
     res.status(500).json({ message: 'Error en el servidor' });
   }
 });
+
+app.post('/voluntariados/:id/evidencias', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const {
+    fecha_evidencia,
+    descripcion,
+    incidentes,
+    asistencia_mentores,
+    porcentaje_participacion,
+    asistencia_voluntarios,
+  } = req.body;
+
+  try {
+    const query = `
+      INSERT INTO evidencias (
+        voluntariado_id, fecha_evidencia, descripcion, incidentes,
+        asistencia_mentores,asistencia_voluntarios ,porcentaje_participacion
+      )
+      VALUES ($1, $2, $3, $4, $5, $6,$7)
+      RETURNING *;
+    `;
+    const values = [
+      id,
+      fecha_evidencia,
+      descripcion,
+      incidentes,
+      asistencia_mentores,
+      asistencia_voluntarios,
+      porcentaje_participacion
+    ];
+
+    const result = await pool.query(query, values);
+    res.status(201).json({ message: 'Evidencia registrada correctamente.', evidencia: result.rows[0] });
+  } catch (error) {
+    console.error('Error al registrar evidencia:', error);
+    res.status(500).json({ message: 'Error al registrar la evidencia.' });
+  }
+});
+
+app.get('/voluntariados/:id/evidencias/calculos', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Obtener la cantidad total de voluntarios asignados al voluntariado
+    const totalVoluntariosQuery = `
+      SELECT COUNT(*) AS total_voluntarios
+      FROM voluntarios_asignados
+      WHERE id_voluntariado = $1
+    `;
+    const totalVoluntariosResult = await pool.query(totalVoluntariosQuery, [id]);
+    const totalVoluntarios = parseInt(totalVoluntariosResult.rows[0].total_voluntarios) || 0;
+
+    // Calcular la asistencia de los voluntarios
+    const asistenciaQuery = `
+      SELECT
+        COUNT(CASE WHEN estado = 'Presente' THEN 1 END) AS asistentes_voluntarios
+      FROM estado_asistencia ea
+      JOIN asistencias a ON ea.asistencia_id = a.id
+      WHERE a.id_voluntariado = $1
+    `;
+    const asistenciaResult = await pool.query(asistenciaQuery, [id]);
+    const asistentesVoluntarios = parseInt(asistenciaResult.rows[0].asistentes_voluntarios) || 0;
+
+    // Calcular el porcentaje de participación
+    let porcentajeParticipacion = 0;
+    if (totalVoluntarios > 0) {
+      porcentajeParticipacion = (asistentesVoluntarios / totalVoluntarios) * 100;
+    }
+
+    res.status(200).json({
+      porcentajeParticipacion: porcentajeParticipacion.toFixed(2),
+      asistenciaVoluntarios: asistentesVoluntarios,
+    });
+  } catch (error) {
+    console.error('Error al calcular valores:', error);
+    res.status(500).json({ message: 'Error al calcular valores' });
+  }
+});
+
+app.delete('/voluntariados/evidencias/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const deleteQuery = `
+      DELETE FROM evidencias
+      WHERE id = $1
+    `;
+    const result = await pool.query(deleteQuery, [id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Evidencia no encontrada.' });
+    }
+
+    res.status(200).json({ message: 'Evidencia eliminada correctamente.' });
+  } catch (error) {
+    console.error('Error al eliminar la evidencia:', error);
+    res.status(500).json({ message: 'Error al eliminar la evidencia.' });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
 app.get('/voluntariados/:id/asistencias', authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
     const query = `
       SELECT id, fecha_asistencia, total_asistentes
       FROM asistencias
-      WHERE voluntariado_id = $1
+      WHERE id_voluntariado = $1
     `;
     const result = await pool.query(query, [id]);
     res.json(result.rows);
@@ -1124,6 +1317,10 @@ app.get('/voluntariados/:id/asistencias', authenticateToken, async (req, res) =>
     res.status(500).json({ message: 'Error en el servidor' });
   }
 });
+
+
+
+
 
 
 
@@ -1388,16 +1585,20 @@ app.get('/voluntarios/:id', authenticateToken, async (req, res) => {
 });
 
 // Obtener feedback de un voluntario dentro de un voluntariado
-app.get('/voluntarios/:voluntariadoId/:voluntarioId/feedback', authenticateToken, async (req, res) => {
-  const { voluntariadoId, voluntarioId } = req.params;
+app.get('/voluntarios/:voluntarioId/feedback', authenticateToken, async (req, res) => {
+  const {voluntarioId } = req.params;
 
   try {
     const query = `
-      SELECT * 
-      FROM feedback 
-      WHERE id_voluntariado = $1 AND id_voluntario = $2
+      SELECT f.*, v.id AS id_voluntariado, v.nombre AS nombre_voluntariado
+      FROM feedback f
+      JOIN voluntarios_asignados va ON f.id_voluntario = va.id_voluntario
+      JOIN voluntariados v ON va.id_voluntariado = v.id
+      WHERE f.id_voluntario =11;
+;
+
     `;
-    const values = [voluntariadoId, voluntarioId];
+    const values = [voluntarioId];
     
     const result = await pool.query(query, values);
     console.log(result);
@@ -1412,8 +1613,31 @@ app.get('/voluntarios/:voluntariadoId/:voluntarioId/feedback', authenticateToken
   }
 });
 
+
+
+
+
+
+
+
 //******************* BENEFACTORES ************************** */
-// Registrar benefactor
+
+
+app.get('/benefactores', authenticateToken, async (req, res) => {
+  try {
+    const query = `
+      SELECT id, nombre, tipo, nombre_contacto, celular_contacto, direccion, 
+             razon_social, ruc, dni 
+      FROM benefactores
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al listar benefactores:', error);
+    res.status(500).json({ message: 'Error al listar benefactores' });
+  }
+});
+
 app.post('/benefactores', authenticateToken, async (req, res) => {
   const {
     nombre,
@@ -1423,12 +1647,27 @@ app.post('/benefactores', authenticateToken, async (req, res) => {
     direccion,
     razon_social,
     ruc,
+    dni,
   } = req.body;
 
   try {
+    // Validar tipo de benefactor
+    if (tipo === 'persona natural' && (!dni || razon_social || ruc)) {
+      return res
+        .status(400)
+        .json({ message: 'Las personas naturales deben tener DNI y no RUC o razón social.' });
+    }
+
+    if (tipo === 'empresa' && (!razon_social || !ruc || dni)) {
+      return res
+        .status(400)
+        .json({ message: 'Las empresas deben tener razón social, RUC y no DNI.' });
+    }
+
     const query = `
-      INSERT INTO benefactores (nombre, tipo, nombre_contacto, celular_contacto, direccion, razon_social, ruc)
-      VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *;
+      INSERT INTO benefactores (nombre, tipo, nombre_contacto, celular_contacto, direccion, razon_social, ruc, dni)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *;
     `;
     const values = [
       nombre,
@@ -1438,53 +1677,25 @@ app.post('/benefactores', authenticateToken, async (req, res) => {
       direccion,
       razon_social,
       ruc,
+      dni,
     ];
 
     const result = await pool.query(query, values);
-
-    res.status(201).json({
-      message: 'Benefactor registrado correctamente',
-      benefactor: result.rows[0],
-    });
+    res.status(201).json({ message: 'Benefactor registrado correctamente', benefactor: result.rows[0] });
   } catch (error) {
     console.error('Error al registrar benefactor:', error);
-
-    if (error.code === '23505') {
-      // Código de error para valores únicos duplicados
-      return res
-        .status(400)
-        .json({ message: 'El RUC ya está registrado.' });
-    }
-
-    res.status(500).json({
-      message: 'Error en el servidor al registrar benefactor',
-    });
+    res.status(500).json({ message: 'Error al registrar benefactor' });
   }
 });
 
-
-// Obtener lista de benefactores
-app.get('/benefactores', authenticateToken, async (req, res) => {
-  try {
-    const query = `SELECT * FROM benefactores ORDER BY created_at DESC;`;
-    const result = await pool.query(query);
-
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error al obtener benefactores:', error);
-    res.status(500).json({
-      message: 'Error en el servidor al obtener benefactores',
-    });
-  }
-});
-
-
-// Obtener detalle de un benefactor
 app.get('/benefactores/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-
   try {
-    const query = `SELECT * FROM benefactores WHERE id = $1;`;
+    const query = `
+      SELECT id, nombre, tipo, nombre_contacto, celular_contacto, direccion, razon_social, ruc , dni 
+      FROM benefactores 
+      WHERE id = $1
+    `;
     const result = await pool.query(query, [id]);
 
     if (result.rows.length === 0) {
@@ -1494,12 +1705,9 @@ app.get('/benefactores/:id', authenticateToken, async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error al obtener benefactor:', error);
-    res.status(500).json({
-      message: 'Error en el servidor al obtener benefactor',
-    });
+    res.status(500).json({ message: 'Error en el servidor' });
   }
 });
-// Actualizar benefactor
 app.put('/benefactores/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const {
@@ -1510,20 +1718,34 @@ app.put('/benefactores/:id', authenticateToken, async (req, res) => {
     direccion,
     razon_social,
     ruc,
+    dni,
   } = req.body;
 
   try {
+    // Validar tipo de benefactor
+    if (tipo === 'persona natural' && (!dni || razon_social || ruc)) {
+      return res
+        .status(400)
+        .json({ message: 'Las personas naturales deben tener DNI y no RUC o razón social.' });
+    }
+
+    if (tipo === 'empresa' && (!razon_social || !ruc || dni)) {
+      return res
+        .status(400)
+        .json({ message: 'Las empresas deben tener razón social, RUC y no DNI.' });
+    }
+
+    // Limpiar valores no aplicables
+    const finalRuc = tipo === 'empresa' ? ruc : null;
+    const finalRazonSocial = tipo === 'empresa' ? razon_social : null;
+    const finalDni = tipo === 'persona natural' ? dni : null;
+
     const query = `
       UPDATE benefactores
-      SET nombre = $1,
-          tipo = $2,
-          nombre_contacto = $3,
-          celular_contacto = $4,
-          direccion = $5,
-          razon_social = $6,
-          ruc = $7,
-          updated_at = NOW()
-      WHERE id = $8 RETURNING *;
+      SET nombre = $1, tipo = $2, nombre_contacto = $3, celular_contacto = $4, direccion = $5,
+          razon_social = $6, ruc = $7, dni = $8
+      WHERE id = $9
+      RETURNING *;
     `;
     const values = [
       nombre,
@@ -1531,48 +1753,348 @@ app.put('/benefactores/:id', authenticateToken, async (req, res) => {
       nombre_contacto,
       celular_contacto,
       direccion,
-      razon_social,
-      ruc,
+      finalRazonSocial,
+      finalRuc,
+      finalDni,
       id,
     ];
 
     const result = await pool.query(query, values);
-
-    if (result.rows.length === 0) {
+    if (result.rowCount === 0) {
       return res.status(404).json({ message: 'Benefactor no encontrado' });
     }
 
-    res.json({
-      message: 'Benefactor actualizado correctamente',
-      benefactor: result.rows[0],
-    });
+    res.json({ message: 'Benefactor actualizado correctamente', benefactor: result.rows[0] });
   } catch (error) {
     console.error('Error al actualizar benefactor:', error);
-    res.status(500).json({
-      message: 'Error en el servidor al actualizar benefactor',
-    });
+    res.status(500).json({ message: 'Error al actualizar benefactor' });
   }
 });
-// Eliminar benefactor
+
+
 app.delete('/benefactores/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
 
   try {
-    const query = `DELETE FROM benefactores WHERE id = $1 RETURNING *;`;
+    const query = 'DELETE FROM benefactores WHERE id = $1 RETURNING *;';
     const result = await pool.query(query, [id]);
 
-    if (result.rows.length === 0) {
+    if (result.rowCount === 0) {
       return res.status(404).json({ message: 'Benefactor no encontrado' });
     }
 
-    res.json({ message: 'Benefactor eliminado correctamente' });
+    res.json({ message: 'Benefactor eliminado correctamente', benefactor: result.rows[0] });
   } catch (error) {
     console.error('Error al eliminar benefactor:', error);
-    res.status(500).json({
-      message: 'Error en el servidor al eliminar benefactor',
-    });
+    res.status(500).json({ message: 'Error al eliminar benefactor' });
   }
 });
+
+
+
+
+//******************* BENEFICIARIOS ************************** */
+
+app.get('/beneficiarios', authenticateToken, async (req, res) => {
+  try {
+    const query = `
+      SELECT id, tipo, nombre, direccion, telefono, email, genero, edad, representante, ruc,dni ,comentarios, fecha_registro
+      FROM beneficiarios
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al listar beneficiarios:', error);
+    res.status(500).json({ message: 'Error al listar beneficiarios' });
+  }
+});
+
+
+
+app.post('/beneficiarios', authenticateToken, async (req, res) => {
+
+  console.log(req);
+  const {
+    tipo,
+    nombre,
+    direccion,
+    telefono,
+    email,
+    genero,
+    edad,
+    representante,
+    ruc,
+    comentarios,
+    dni,
+  } = req.body;
+
+  try {
+    // Validaciones específicas según el tipo
+    if (tipo === 'Persona' && (!nombre || !genero || !edad || !dni)) {
+      return res.status(400).json({
+        message: 'Los beneficiarios tipo "Persona" requieren nombre, género, edad y DNI.',
+      });
+    }
+
+    if (tipo === 'Comunidad' && (!nombre || !representante)) {
+      return res.status(400).json({
+        message: 'Los beneficiarios tipo "Comunidad" requieren nombre y representante.',
+      });
+    }
+
+    if (tipo === 'Organización' && (!nombre || !ruc)) {
+      return res.status(400).json({
+        message: 'Los beneficiarios tipo "Organización" requieren nombre y RUC.',
+      });
+    }
+
+      const query = `
+      INSERT INTO beneficiarios (tipo, nombre, direccion, telefono, email, genero, edad, representante, ruc, comentarios, dni)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      RETURNING *;
+    `;
+    const values = [tipo, nombre, direccion, telefono, email, genero, edad, representante, ruc, comentarios, dni];
+  
+
+    const result = await pool.query(query, values);
+    res.status(201).json({
+      message: 'Beneficiario registrado correctamente',
+      beneficiario: result.rows[0],
+    });
+  } catch (error) {
+    console.error('Error al registrar beneficiario:', error);
+    res.status(500).json({ message: 'Error al registrar beneficiario' });
+  }
+});
+
+app.get('/beneficiarios/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const query = `
+      SELECT id, tipo, nombre, direccion, telefono, email, genero, edad, representante, ruc, comentarios, dni, fecha_registro
+      FROM beneficiarios
+      WHERE id = $1
+    `;
+    const values = [id];
+
+    const result = await pool.query(query, values);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Beneficiario no encontrado' });
+    }
+
+    res.status(200).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al obtener beneficiario:', error);
+    res.status(500).json({ message: 'Error al obtener beneficiario' });
+  }
+});
+
+app.put('/beneficiarios/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const {
+    tipo,
+    nombre,
+    direccion,
+    telefono,
+    email,
+    genero,
+    edad,
+    representante,
+    ruc,
+    comentarios,
+    dni,
+  } = req.body;
+
+  try {
+    // Validaciones específicas según el tipo
+    if (tipo === 'Persona' && (!nombre || !genero || !edad || !dni)) {
+      return res.status(400).json({
+        message: 'Los beneficiarios tipo "Persona" requieren nombre, género, edad y DNI.',
+      });
+    }
+    
+
+    if (tipo === 'Comunidad' && (!nombre || !representante)) {
+      return res.status(400).json({
+        message: 'Los beneficiarios tipo "Comunidad" requieren nombre y representante.',
+      });
+    }
+
+    if (tipo === 'Organización' && (!nombre || !ruc)) {
+      return res.status(400).json({
+        message: 'Los beneficiarios tipo "Organización" requieren nombre y RUC.',
+      });
+    }
+
+    const query = `
+    UPDATE beneficiarios
+    SET tipo = $1, nombre = $2, direccion = $3, telefono = $4, email = $5,
+        genero = $6, edad = $7, representante = $8, ruc = $9, comentarios = $10, dni = $11
+    WHERE id = $12
+    RETURNING *;
+  `;
+  const values = [tipo, nombre, direccion, telefono, email, genero, edad, representante, ruc, comentarios, dni, id];
+  
+
+    const result = await pool.query(query, values);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Beneficiario no encontrado' });
+    }
+
+    res.status(200).json({
+      message: 'Beneficiario actualizado correctamente',
+      beneficiario: result.rows[0],
+    });
+  } catch (error) {
+    console.error('Error al actualizar beneficiario:', error);
+    res.status(500).json({ message: 'Error al actualizar beneficiario' });
+  }
+});
+
+
+
+
+
+
+app.post('/voluntariados/:id/beneficiarios', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { id_beneficiario } = req.body;
+
+  try {
+    const query = `
+      INSERT INTO voluntariados_beneficiarios (id_voluntariado, id_beneficiario)
+      VALUES ($1, $2)
+      RETURNING *;
+    `;
+    const values = [id, id_beneficiario];
+    const result = await pool.query(query, values);
+    res.status(201).json({ message: 'Beneficiario asignado correctamente', asignacion: result.rows[0] });
+  } catch (error) {
+    console.error('Error al asignar beneficiario:', error);
+    res.status(500).json({ message: 'Error al asignar beneficiario' });
+  }
+});
+
+app.post('/beneficiarios/:id/interacciones', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { id_voluntariado, tipo_interaccion, descripcion } = req.body;
+
+  try {
+    const query = `
+      INSERT INTO interacciones_beneficiarios (id_beneficiario, id_voluntariado, tipo_interaccion, descripcion)
+      VALUES ($1, $2, $3, $4)
+      RETURNING *;
+    `;
+    const values = [id, id_voluntariado, tipo_interaccion, descripcion];
+    const result = await pool.query(query, values);
+    res.status(201).json({ message: 'Interacción registrada correctamente', interaccion: result.rows[0] });
+  } catch (error) {
+    console.error('Error al registrar interacción:', error);
+    res.status(500).json({ message: 'Error al registrar interacción' });
+  }
+});
+
+
+
+//******************* feedback ************************** */
+
+app.post('/voluntarios/feedback', authenticateToken, async (req, res) => {
+  const { id_voluntario, fecha, adicional, mentor, descripcion, tipo } = req.body;
+
+  try {
+      if (!id_voluntario || !fecha || !mentor || !descripcion || !tipo) {
+          return res.status(400).json({ message: 'Todos los campos obligatorios deben ser completados.' });
+      }
+
+      const query = `
+          INSERT INTO feedback (id_voluntario, fecha, adicional, mentor, descripcion, tipo)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING *;
+      `;
+      const values = [id_voluntario, fecha, adicional || null, mentor, descripcion, tipo];
+
+      const result = await pool.query(query, values);
+      res.status(201).json({ message: 'Feedback registrado correctamente', feedback: result.rows[0] });
+  } catch (error) {
+      console.error('Error al registrar feedback:', error);
+      res.status(500).json({ message: 'Error al registrar feedback' });
+  }
+});
+
+app.get('/voluntarios/feedback/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const query = 'SELECT * FROM feedback WHERE id = $1';
+    const values = [id];
+
+    const result = await pool.query(query, values);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Feedback no encontrado' });
+    }
+
+    res.status(200).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al obtener feedback:', error);
+    res.status(500).json({ message: 'Error al obtener feedback' });
+  }
+});
+
+
+app.put('voluntarios/feedback/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { fecha, adicional, mentor, descripcion, tipo } = req.body;
+
+  try {
+    if (!fecha || !mentor || !descripcion || !tipo) {
+      return res.status(400).json({ message: 'Todos los campos obligatorios deben ser completados.' });
+    }
+
+    const query = `
+      UPDATE feedback
+      SET fecha = $1, adicional = $2, mentor = $3, descripcion = $4, tipo = $5
+      WHERE id = $6
+      RETURNING *;
+    `;
+    const values = [fecha, adicional || null, mentor, descripcion, tipo, id];
+
+    const result = await pool.query(query, values);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Feedback no encontrado' });
+    }
+
+    res.status(200).json({ message: 'Feedback actualizado correctamente', feedback: result.rows[0] });
+  } catch (error) {
+    console.error('Error al editar feedback:', error);
+    res.status(500).json({ message: 'Error al editar feedback' });
+  }
+});
+
+app.delete('/voluntarios/feedback/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const query = 'DELETE FROM feedback WHERE id = $1 RETURNING *';
+    const values = [id];
+
+    const result = await pool.query(query, values);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Feedback no encontrado' });
+    }
+
+    res.status(200).json({ message: 'Feedback eliminado correctamente', feedback: result.rows[0] });
+  } catch (error) {
+    console.error('Error al eliminar feedback:', error);
+    res.status(500).json({ message: 'Error al eliminar feedback' });
+  }
+});
+
+
 
 
 app.listen(port, () => {
