@@ -233,8 +233,7 @@ app.post('/usuarios/registro', upload.single('cv'), async (req, res) => {
     tipo_usuario,
   } = req.body; // `req.body` contiene los campos enviados
 
-  console.log('Datos recibidos en el backend:', req.body);
-  console.log('Archivo recibido:', req.file); // `req.file` contiene los detalles del archivo subido
+
 
   try {
     if (!dni || !nombre || !apellido_paterno || !apellido_materno || !correo) {
@@ -266,7 +265,7 @@ app.post('/usuarios/registro', upload.single('cv'), async (req, res) => {
 
     // Si hay un archivo, puedes guardarlo en otra tabla o procesarlo aquí
     if (req.file) {
-      console.log('Archivo subido con éxito:', req.file.path);
+    
       // Por ejemplo, guardar la ruta del archivo en la base de datos
     }
 
@@ -348,22 +347,89 @@ app.put('/usuarios/:id', async (req, res) => {
   }
 });
 
+app.patch('/usuarios/:id/estado', authenticateToken, async (req, res) => {
+  const { id } = req.params; // ID del usuario desde los parámetros
+  const { estado_usuario } = req.body; // Estado enviado en el cuerpo de la solicitud
+
+  if (typeof estado_usuario !== 'boolean') {
+    return res.status(400).json({ message: 'El valor de estado_usuario debe ser booleano (true o false).' });
+  }
+
+  try {
+    const query = `
+      UPDATE usuarios
+      SET estado_usuario = $1
+      WHERE id = $2
+      RETURNING *;
+    `; // Actualizamos el campo `estado_usuario` en la tabla `usuarios`
+
+    const result = await pool.query(query, [estado_usuario, id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Usuario no encontrado.' });
+    }
+
+    res.status(200).json({ 
+      message: `Estado cambiado a ${estado_usuario ? 'ACTIVO' : 'INACTIVO'}`,
+      usuario: result.rows[0] // Devuelve el usuario actualizado como respuesta
+    });
+  } catch (error) {
+    console.error('Error al cambiar el estado del usuario:', error);
+    res.status(500).json({ message: 'Error en el servidor al cambiar estado.' });
+  }
+});
+
+
+
+
 // *************SECCION VOLUNTARIOS ****************
 
-// Obtener CV de voluntarios
-app.get('/voluntarios/:id/cv', async (req, res) => {
-    const voluntarioId = req.params.id;
-    try {
-        const result = await pool.query('SELECT cv FROM voluntarios WHERE id = $1', [voluntarioId]);
-        if (result.rows.length === 0) return res.status(404).json({ message: 'Voluntario no encontrado o sin CV' });
+app.get('/voluntarios', async (req, res) => {
+  try {
+    const query = `
+      SELECT *FROM voluntarios
+    `;
+    const result = await pool.query(query);
 
-        const cvBuffer = result.rows[0].cv;
-        res.setHeader('Content-Type', 'application/pdf');
-        res.send(cvBuffer);
-    } catch (error) {
-        console.error('Error al obtener el CV del voluntario:', error);
-        res.status(500).json({ message: 'Error al obtener el CV del voluntario' });
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'No se encontraron voluntarios' });
     }
+
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener voluntarios:', error);
+    res.status(500).json({ message: 'Error en el servidor al obtener los voluntarios' });
+  }
+});
+
+
+app.get('/voluntarios/:id/cv', async (req, res) => {
+  const voluntarioId = req.params.id;
+  try {
+      const result = await pool.query('SELECT cv FROM voluntarios WHERE id = $1', [voluntarioId]);
+      if (result.rows.length === 0) return res.status(404).json({ message: 'Voluntario no encontrado o sin CV' });
+
+      const cvBuffer = result.rows[0].cv;
+      res.setHeader('Content-Type', 'application/pdf');
+      res.send(cvBuffer);
+  } catch (error) {
+      console.error('Error al obtener el CV del voluntario:', error);
+      res.status(500).json({ message: 'Error al obtener el CV del voluntario' });
+  }
+});
+
+app.get('/voluntarios/:id', authenticateToken, async (req, res) => {
+const { id } = req.params;
+try {
+  const result = await pool.query('SELECT * FROM voluntarios WHERE id = $1', [id]);
+  if (result.rows.length === 0) {
+    return res.status(404).json({ message: 'Voluntario no encontrado' });
+  }
+  res.status(200).json(result.rows[0]);
+} catch (error) {
+  console.error('Error al obtener detalle del voluntario:', error);
+  res.status(500).json({ message: 'Error al obtener detalle del voluntario' });
+}
 });
 
 app.get('/voluntarios/:id', authenticateToken, async (req, res) => {
@@ -417,23 +483,20 @@ app.put('/voluntarios/:id/cambiar-contrasena', authenticateToken, async (req, re
   }
 });
 
-app.get('/voluntarios', async (req, res) => {
+app.get('/voluntarios/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
   try {
-    const query = `
-      SELECT *FROM voluntarios
-    `;
-    const result = await pool.query(query);
-
+    const result = await pool.query('SELECT * FROM voluntarios WHERE id = $1', [id]);
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'No se encontraron voluntarios' });
+      return res.status(404).json({ message: 'Voluntario no encontrado' });
     }
-
-    res.status(200).json(result.rows);
+    res.status(200).json(result.rows[0]);
   } catch (error) {
-    console.error('Error al obtener voluntarios:', error);
-    res.status(500).json({ message: 'Error en el servidor al obtener los voluntarios' });
+    console.error('Error al obtener detalle del voluntario:', error);
+    res.status(500).json({ message: 'Error al obtener detalle del voluntario' });
   }
 });
+
 
 
 
@@ -463,8 +526,7 @@ app.post('/voluntarios/registro', upload.single('cv'), async (req, res) => {
 
   const cvFile = req.file ? req.file.path : null; // Ruta del archivo CV en el servidor
 
-  console.log('Datos recibidos:', req.body);
-  console.log('Archivo recibido:', req.file);
+
 
   try {
     // Validar campos obligatorios
@@ -671,7 +733,7 @@ app.put('/voluntarios/:id/estado', async (req, res) => {
   const voluntarioId = req.params.id;
   const { nuevoEstado } = req.body;
 
-  console.log(`Cambiando estado del voluntario ID ${voluntarioId} a ${nuevoEstado}`);
+
 
   try {
     const result = await pool.query(
@@ -783,7 +845,7 @@ app.get('/voluntarios/:id/historial', async (req, res) => {
   }
 });
 
-// Obtener feedback de un voluntariado específico
+//Obtener feedback de un voluntariado específico
 app.get('/voluntarios/:id/feedback', async (req, res) => {
   const { id } = req.params; // ID del voluntario
 
@@ -792,6 +854,7 @@ app.get('/voluntarios/:id/feedback', async (req, res) => {
       SELECT 
         fb.id AS feedback_id,
         fb.fecha AS feedback_fecha,
+        fb.descripcion,
         fb.tipo,
         fb.adicional,
         fb.mentor,
@@ -972,7 +1035,7 @@ app.put('/variables-sistema/:id', async (req, res) => {
 
 function authenticateToken(req, res, next) {
   const token = req.get('Authorization')?.split(' ')[1];
-  console.log('Token recibido:', token); // Depuración
+ 
 
   if (!token) {
     console.warn('Token no proporcionado');
@@ -985,7 +1048,7 @@ function authenticateToken(req, res, next) {
       return res.status(403).json({ message: 'Token no válido' });
     }
 
-    console.log('Payload decodificado:', user); // Verifica el contenido del token
+
 
     if (!user || !user.id || !user.tipo_usuario) {
       console.warn('Información incompleta en el token:', user);
@@ -1001,8 +1064,7 @@ module.exports = authenticateToken;
 
 app.get('/voluntariados', authenticateToken, async (req, res) => {
   const rol  = req.user.tipo_usuario; // Asegúrate de que req.user esté correctamente poblado
-  console.log(req.user.tipo_usuario);
-  console.log('Rol del usuario:', rol); // Verifica el valor del rol
+
   try {
     // Verifica que el rol esté presente y sea uno de los roles permitidos
     if (!rol || !['ADMINISTRADOR', 'RRHH', 'MENTOR'].includes(rol.toUpperCase())) {
@@ -1015,13 +1077,13 @@ app.get('/voluntariados', authenticateToken, async (req, res) => {
           v.nombre, 
           v.tipo, 
           v.fecha_inicio, 
-          v.estado_voluntariado
+          v.estado_alta
       FROM voluntariados v
       ORDER BY v.fecha_inicio DESC;
     `;
 
     const result = await pool.query(query); // Ejecuta la consulta
-    console.log('Resultado de la consulta:', result.rows); 
+ 
     // Si no hay resultados, puedes manejarlo de manera adecuada
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'No se encontraron voluntariados' });
@@ -1034,96 +1096,175 @@ app.get('/voluntariados', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/voluntariados', authenticateToken, async (req, res) => {
-  const {
-    nombre,
-    tipo,
-    fecha_inicio,
-    fecha_fin,
-    objetivoGeneral,
-    objetivoEspecifico1,
-    objetivoEspecifico2,
-    objetivoEspecifico3,
-    objetivoEspecifico4,
-    objetivoEspecifico5,
-    publicoObjetivo,
-    beneficiariosDirectos,
-    beneficiariosIndirectos,
-    presupuestoInicial,
-    aliados,
-  } = req.body;
-
-  const id_usuario = req.user.id; // Extraer el id del token
-
-  if (!id_usuario) {
-    return res.status(401).json({ message: 'El usuario no está autenticado.' });
-  }
-
-  // Validar campos obligatorios
-  if (!nombre || !tipo || !fecha_inicio || !fecha_fin || !objetivoGeneral || !publicoObjetivo) {
-    return res.status(400).json({ message: 'Faltan datos obligatorios' });
-  }
-
-  try {
-    const query = `
-      INSERT INTO voluntariados (
-        nombre, tipo, fecha_inicio, fecha_cierre_proyectada, objetivo_general,
-        objetivo_especifico1, objetivo_especifico2, objetivo_especifico3,
-        objetivo_especifico4, objetivo_especifico5, publico_objetivo,
-        beneficiarios_directos, beneficiarios_indirectos, presupuesto_inicial, aliados, id_usuario
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-      RETURNING *;
-    `;
-
-    const values = [
-      nombre,
-      tipo,
-      fecha_inicio,
-      fecha_fin,
-      objetivoGeneral,
-      objetivoEspecifico1 || null,
-      objetivoEspecifico2 || null,
-      objetivoEspecifico3 || null,
-      objetivoEspecifico4 || null,
-      objetivoEspecifico5 || null,
-      publicoObjetivo,
-      beneficiariosDirectos || null,
-      beneficiariosIndirectos || null,
-      presupuestoInicial || null,
-      aliados || null,
-      id_usuario, // Usar el id del token
-    ];
-
-    console.log('Valores de la consulta:', values);
-
-    const result = await pool.query(query, values);
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error('Error al crear voluntariado:', error);
-    res.status(500).json({ message: 'Error en el servidor al crear voluntariado', error: error.message });
-  }
-});
-// Obtener un voluntariado por ID
 app.get('/voluntariados/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  console.log('Usuario autenticado:', req.user); // Verifica el usuario autenticado
 
   try {
-    const query = 'SELECT * FROM voluntariados WHERE id = $1';
-    const result = await pool.query(query, [id]);
+      const voluntariadoQuery = `SELECT * FROM voluntariados WHERE id = $1`;
+      const estadoQuery = `
+          SELECT estado FROM estados_voluntariado
+          WHERE id_voluntariado = $1
+          ORDER BY fecha DESC
+          LIMIT 1;
+      `;
 
-    if (result.rows.length === 0) {
-      console.warn('Voluntariado no encontrado:', id);
-      return res.status(404).json({ message: 'Voluntariado no encontrado' });
-    }
+      const voluntariadoResult = await pool.query(voluntariadoQuery, [id]);
+      const estadoResult = await pool.query(estadoQuery, [id]);
 
-    res.json(result.rows[0]);
+      if (voluntariadoResult.rowCount === 0) {
+          return res.status(404).json({ message: 'Voluntariado no encontrado' });
+      }
+
+      const voluntariado = voluntariadoResult.rows[0];
+      voluntariado.estado_dinamico = estadoResult.rows[0]?.estado || 'Desconocido';
+
+      res.json(voluntariado);
   } catch (error) {
-    console.error('Error al obtener voluntariado:', error);
-    res.status(500).json({ message: 'Error en el servidor' });
+      console.error('Error al obtener voluntariado:', error);
+      res.status(500).json({ message: 'Error en el servidor' });
   }
 });
+
+
+app.patch('/voluntariados/:id/estado-alta', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { estado_alta } = req.body; // true para De Alta, false para De Baja
+
+  if (typeof estado_alta !== 'boolean') {
+      return res.status(400).json({ message: 'El valor de estado_alta debe ser booleano (true o false).' });
+  }
+
+  try {
+      const query = `
+          UPDATE voluntariados
+          SET estado_alta = $1
+          WHERE id = $2
+          RETURNING *;
+      `;
+      const result = await pool.query(query, [estado_alta, id]);
+
+      if (result.rowCount === 0) {
+          return res.status(404).json({ message: 'Voluntariado no encontrado.' });
+      }
+
+      res.status(200).json({ message: `Estado cambiado a ${estado_alta ? 'De Alta' : 'De Baja'}` });
+  } catch (error) {
+      console.error('Error al cambiar estado_alta:', error);
+      res.status(500).json({ message: 'Error en el servidor al cambiar estado.' });
+  }
+});
+
+app.post('/voluntariados/:id/aprobar', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+      // Verificar si el voluntariado existe
+      const voluntariado = await pool.query(`SELECT * FROM voluntariados WHERE id = $1`, [id]);
+      if (voluntariado.rowCount === 0) {
+          return res.status(404).json({ message: 'Voluntariado no encontrado' });
+      }
+
+      // Insertar el nuevo estado 'Aprobado' en la tabla `estados_voluntariado`
+      await pool.query(
+          `INSERT INTO estados_voluntariado (id_voluntariado, estado) VALUES ($1, 'Aprobado')`,
+          [id]
+      );
+
+      res.status(200).json({ message: 'Voluntariado aprobado con éxito.' });
+  } catch (error) {
+      console.error('Error al aprobar voluntariado:', error);
+      res.status(500).json({ message: 'Error en el servidor al aprobar voluntariado' });
+  }
+});
+
+
+
+app.post('/voluntariados', authenticateToken, async (req, res) => {
+  const {
+      nombre, tipo, fecha_inicio, fecha_fin, objetivoGeneral,
+      objetivoEspecifico1, objetivoEspecifico2, objetivoEspecifico3,
+      objetivoEspecifico4, objetivoEspecifico5, publicoObjetivo,
+      beneficiariosDirectos, beneficiariosIndirectos, presupuestoInicial,
+      aliados
+  } = req.body;
+
+  const id_usuario = req.user.id;
+
+  if (!id_usuario) {
+      return res.status(401).json({ message: 'El usuario no está autenticado.' });
+  }
+
+  if (!nombre || !tipo || !fecha_inicio || !fecha_fin || !objetivoGeneral || !publicoObjetivo) {
+      return res.status(400).json({ message: 'Faltan datos obligatorios' });
+  }
+
+  try {
+      // Insertar en la tabla voluntariados con estado_alta como FALSE por defecto
+      const query = `
+          INSERT INTO voluntariados (
+              nombre, tipo, fecha_inicio, fecha_cierre_proyectada, objetivo_general,
+              objetivo_especifico1, objetivo_especifico2, objetivo_especifico3,
+              objetivo_especifico4, objetivo_especifico5, publico_objetivo,
+              beneficiarios_directos, beneficiarios_indirectos, presupuesto_inicial, aliados, id_usuario, estado_alta
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+          RETURNING id;
+      `;
+
+      const values = [
+          nombre, tipo, fecha_inicio, fecha_fin, objetivoGeneral,
+          objetivoEspecifico1 || null, objetivoEspecifico2 || null, objetivoEspecifico3 || null,
+          objetivoEspecifico4 || null, objetivoEspecifico5 || null, publicoObjetivo,
+          beneficiariosDirectos || null, beneficiariosIndirectos || null,
+          presupuestoInicial || null, aliados || null, id_usuario, false // estado_alta por defecto
+      ];
+
+      const result = await pool.query(query, values);
+      const idVoluntariado = result.rows[0].id;
+
+      // Insertar el estado inicial 'Pendiente' en estados_voluntariado
+      await pool.query(
+          `INSERT INTO estados_voluntariado (id_voluntariado, estado) VALUES ($1, 'Pendiente')`,
+          [idVoluntariado]
+      );
+
+      res.status(201).json({ message: 'Voluntariado creado con estado inicial Pendiente y De Baja', id: idVoluntariado });
+  } catch (error) {
+      console.error('Error al crear voluntariado:', error);
+      res.status(500).json({ message: 'Error en el servidor al crear voluntariado' });
+  }
+});
+
+app.patch('/voluntariados/:id/estado-alta', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { estado_alta } = req.body; // true para De Alta, false para De Baja
+
+  if (typeof estado_alta !== 'boolean') {
+      return res.status(400).json({ message: 'El valor de estado_alta debe ser booleano (true o false).' });
+  }
+
+  try {
+      const query = `
+          UPDATE voluntariados
+          SET estado_alta = $1
+          WHERE id = $2
+          RETURNING *;
+      `;
+      const result = await pool.query(query, [estado_alta, id]);
+
+      if (result.rowCount === 0) {
+          return res.status(404).json({ message: 'Voluntariado no encontrado.' });
+      }
+
+      res.status(200).json({ message: `Estado cambiado a ${estado_alta ? 'De Alta' : 'De Baja'}` });
+  } catch (error) {
+      console.error('Error al cambiar estado_alta:', error);
+      res.status(500).json({ message: 'Error en el servidor al cambiar estado.' });
+  }
+});
+
+
+
 
 
 app.get('/voluntariados/:id/voluntarios', authenticateToken, async (req, res) => {
@@ -1155,6 +1296,53 @@ app.get('/voluntariados/:id/voluntarios', authenticateToken, async (req, res) =>
     res.status(500).json({ message: 'Error en el servidor' });
   }
 });
+
+app.put('/voluntariados/:id/aprobar', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const query = `UPDATE voluntariados SET estado_voluntariado = 'Aprobado' WHERE id = $1`;
+    await pool.query(query, [id]);
+    res.status(200).json({ message: 'Voluntariado aprobado exitosamente.' });
+  } catch (error) {
+    console.error('Error al aprobar el voluntariado:', error);
+    res.status(500).json({ message: 'Error en el servidor' });
+  }
+});
+
+app.put('/voluntariados/:id/estado', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { estado } = req.body; // 'De Alta' o 'De Baja'
+  try {
+    const query = `UPDATE voluntariados SET estado_voluntariado = $1 WHERE id = $2`;
+    await pool.query(query, [estado, id]);
+    res.status(200).json({ message: `Voluntariado cambiado a estado ${estado}` });
+  } catch (error) {
+    console.error('Error al cambiar estado:', error);
+    res.status(500).json({ message: 'Error en el servidor' });
+  }
+});
+
+app.put('/voluntariados/:id/cerrar', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { presupuesto, logros } = req.body;
+  if (!presupuesto || !logros.trim()) {
+    return res.status(400).json({ message: 'Todos los campos son obligatorios.' });
+  }
+  try {
+    const query = `
+      UPDATE voluntariados
+      SET estado_voluntariado = 'Cerrado', presupuesto_ejecutado = $1, logros = $2
+      WHERE id = $3
+    `;
+    await pool.query(query, [presupuesto, logros, id]);
+    res.status(200).json({ message: 'Voluntariado cerrado exitosamente.' });
+  } catch (error) {
+    console.error('Error al cerrar el voluntariado:', error);
+    res.status(500).json({ message: 'Error en el servidor' });
+  }
+});
+
+
 
 /****************EVIDENCIAS FLUJO VOLUNTARIADO************* */
 app.get('/voluntariados/:id/evidencias', authenticateToken, async (req, res) => {
@@ -1327,7 +1515,7 @@ app.get('/voluntariados/:id/asistencias', authenticateToken, async (req, res) =>
 // Actualizar un voluntariado
 app.put('/voluntariados/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  console.log("ID recibido para actualización:", id);
+
 
   const {
     nombre, // Incluye el nombre en la destructuración
@@ -1392,7 +1580,7 @@ app.put('/voluntariados/:id', authenticateToken, async (req, res) => {
       id,
     ];
 
-    console.log("Valores enviados al query:", values);
+
 
     const result = await pool.query(query, values);
 
@@ -1400,7 +1588,7 @@ app.put('/voluntariados/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Voluntariado no encontrado' });
     }
 
-    console.log("Registro actualizado:", result.rows[0]);
+    
 
     res.status(200).json({ message: 'Voluntariado actualizado correctamente', data: result.rows[0] });
   } catch (error) {
@@ -1529,8 +1717,7 @@ app.get('/voluntariados/:voluntariadoId/voluntarios', authenticateToken, async (
     `;
 
     const result = await pool.query(query, [voluntariadoId]);
-    console.log(result);
-
+   
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'No hay voluntarios asignados para este voluntariado' });
     }
@@ -1564,54 +1751,6 @@ app.delete('/voluntariados/:voluntariadoId/voluntarios/:voluntarioId', authentic
   }
 });
 
-app.get('/voluntarios/:id', authenticateToken, async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const result = await pool.query(
-      "SELECT * FROM voluntarios WHERE id = $1",
-      [id]
-    );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ message: 'Voluntario no encontrado' });
-    }
-
-    res.status(200).json(result.rows[0]);
-  } catch (error) {
-    console.error('Error al obtener detalle del voluntario:', error);
-    res.status(500).json({ message: 'Error al obtener detalle del voluntario' });
-  }
-});
-
-// Obtener feedback de un voluntario dentro de un voluntariado
-app.get('/voluntarios/:voluntarioId/feedback', authenticateToken, async (req, res) => {
-  const {voluntarioId } = req.params;
-
-  try {
-    const query = `
-      SELECT f.*, v.id AS id_voluntariado, v.nombre AS nombre_voluntariado
-      FROM feedback f
-      JOIN voluntarios_asignados va ON f.id_voluntario = va.id_voluntario
-      JOIN voluntariados v ON va.id_voluntariado = v.id
-      WHERE f.id_voluntario =11;
-;
-
-    `;
-    const values = [voluntarioId];
-    
-    const result = await pool.query(query, values);
-    console.log(result);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'No se encontró feedback para el voluntario en este voluntariado' });
-    }
-
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error al obtener feedback:', error);
-    res.status(500).json({ message: 'Error en el servidor al obtener feedback' });
-  }
-});
 
 
 
@@ -1809,11 +1948,8 @@ app.get('/beneficiarios', authenticateToken, async (req, res) => {
   }
 });
 
-
-
 app.post('/beneficiarios', authenticateToken, async (req, res) => {
 
-  console.log(req);
   const {
     tipo,
     nombre,
@@ -2044,9 +2180,34 @@ app.get('/voluntarios/feedback/:id', authenticateToken, async (req, res) => {
 });
 
 
-app.put('voluntarios/feedback/:id', authenticateToken, async (req, res) => {
+
+app.get('/voluntarios/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query(
+      "SELECT * FROM voluntarios WHERE id = $1",
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Voluntario no encontrado' });
+    }
+
+    res.status(200).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al obtener detalle del voluntario:', error);
+    res.status(500).json({ message: 'Error al obtener detalle del voluntario' });
+  }
+});
+
+
+
+app.put('/voluntarios/feedback/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { fecha, adicional, mentor, descripcion, tipo } = req.body;
+
+
 
   try {
     if (!fecha || !mentor || !descripcion || !tipo) {
