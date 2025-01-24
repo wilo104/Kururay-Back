@@ -193,9 +193,6 @@ app.post('/login', async (req, res) => {
 
 
 
-
-
-
 // *************SECCION USUARIOS****************
 
 // Obtener lista de usuarios
@@ -497,9 +494,6 @@ app.get('/voluntarios/:id', authenticateToken, async (req, res) => {
   }
 });
 
-
-
-
 app.post('/voluntarios/registro', upload.single('cv'), async (req, res) => {
   const {
     dni,
@@ -752,9 +746,6 @@ app.put('/voluntarios/:id/estado', async (req, res) => {
   }
 });
 
-
-
-
 // Endpoint para cambiar la contraseña de un usuario o voluntario
 app.put('/:tabla/:id/cambiar-contrasena', async (req, res) => {
   const { tabla, id } = req.params; // La tabla puede ser "usuarios" o "voluntarios"
@@ -882,11 +873,6 @@ app.get('/voluntarios/:id/feedback', async (req, res) => {
     res.status(500).json({ message: 'Error en el servidor al obtener el feedback' });
   }
 });
-
-
-
-
-
 
 
 
@@ -1030,12 +1016,11 @@ app.put('/variables-sistema/:id', async (req, res) => {
 });
 
 
-
 // *************SECCION VOLUTARIADOS****************
 
 function authenticateToken(req, res, next) {
   const token = req.get('Authorization')?.split(' ')[1];
- 
+  // const token = authHeader ? authHeader.split(' ')[1] : undefined;
 
   if (!token) {
     console.warn('Token no proporcionado');
@@ -1116,7 +1101,10 @@ app.get('/voluntariados/:id', authenticateToken, async (req, res) => {
       }
 
       const voluntariado = voluntariadoResult.rows[0];
-      voluntariado.estado_dinamico = estadoResult.rows[0]?.estado || 'Desconocido';
+       voluntariado.estado_dinamico = estadoResult.rows[0]?.estado || 'Desconocido';
+
+      // const estadoRow = estadoResult.rows[0];
+      // voluntariado.estado_dinamico = estadoRow && estadoRow.estado ? estadoRow.estado : 'Desconocido';
 
       res.json(voluntariado);
   } catch (error) {
@@ -1177,6 +1165,44 @@ app.post('/voluntariados/:id/aprobar', authenticateToken, async (req, res) => {
   }
 });
 
+app.post('/voluntariados/:id/cerrar', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { presupuestoEjecutado, logros } = req.body;
+
+  try {
+    // Verificar si el voluntariado existe
+    const voluntariado = await pool.query(`SELECT * FROM voluntariados WHERE id = $1`, [id]);
+    if (voluntariado.rowCount === 0) {
+      return res.status(404).json({ message: 'Voluntariado no encontrado' });
+    }
+
+    // Validar los datos recibidos
+    if (!presupuestoEjecutado || isNaN(presupuestoEjecutado)) {
+      return res.status(400).json({ message: 'El presupuesto ejecutado es obligatorio y debe ser un número válido.' });
+    }
+
+    if (!logros || logros.length > 1000) {
+      return res.status(400).json({ message: 'Los logros son obligatorios y no deben superar los 1000 caracteres.' });
+    }
+
+    // Insertar el nuevo estado 'Cerrado' en la tabla `estados_voluntariado`
+    await pool.query(
+      `INSERT INTO estados_voluntariado (id_voluntariado, estado) VALUES ($1, 'Cerrado')`,
+      [id]
+    );
+
+    // Actualizar los datos adicionales del voluntariado (si hay una columna para esto)
+    await pool.query(
+      `UPDATE voluntariados SET presupuesto_ejecutado = $1, logros = $2 WHERE id = $3`,
+      [presupuestoEjecutado, logros, id]
+    );
+
+    res.status(200).json({ message: 'Voluntariado cerrado con éxito.' });
+  } catch (error) {
+    console.error('Error al cerrar voluntariado:', error);
+    res.status(500).json({ message: 'Error en el servidor al cerrar voluntariado.' });
+  }
+});
 
 
 app.post('/voluntariados', authenticateToken, async (req, res) => {
@@ -1266,36 +1292,6 @@ app.patch('/voluntariados/:id/estado-alta', authenticateToken, async (req, res) 
 
 
 
-
-app.get('/voluntariados/:id/voluntarios', authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  try {
-    const query = `
-      SELECT 
-        v.id,
-        v.dni,
-        v.nombre,
-        v.apellido_paterno,
-        v.apellido_materno,
-        v.correo,
-        v.celular,
-        v.ciudad_residencia,
-        v.rol,
-        v.area,
-        v.categoria,
-        v.grado_instruccion,
-        v.carrera
-      FROM voluntarios v
-      INNER JOIN voluntarios_asignados va ON va.id_voluntario = v.id
-      WHERE va.id_voluntariado = $1
-    `;
-    const result = await pool.query(query, [id]);
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error al obtener voluntarios asignados:', error);
-    res.status(500).json({ message: 'Error en el servidor' });
-  }
-});
 
 app.put('/voluntariados/:id/aprobar', authenticateToken, async (req, res) => {
   const { id } = req.params;
@@ -1429,24 +1425,22 @@ app.get('/voluntariados/:id/evidencias/calculos', authenticateToken, async (req,
       WHERE id_voluntariado = $1
     `;
     const totalVoluntariosResult = await pool.query(totalVoluntariosQuery, [id]);
-    const totalVoluntarios = parseInt(totalVoluntariosResult.rows[0].total_voluntarios) || 0;
+    const totalVoluntarios = parseInt(totalVoluntariosResult.rows[0].total_voluntarios, 10) || 0;
 
-    // Calcular la asistencia de los voluntarios
+    // Calcular la cantidad de asistentes (estado = 'Presente')
     const asistenciaQuery = `
-      SELECT
-        COUNT(CASE WHEN estado = 'Presente' THEN 1 END) AS asistentes_voluntarios
+      SELECT COUNT(*) AS asistentes_voluntarios
       FROM estado_asistencia ea
-      JOIN asistencias a ON ea.asistencia_id = a.id
-      WHERE a.id_voluntariado = $1
+      INNER JOIN asistencias a ON ea.asistencia_id = a.id
+      WHERE a.id_voluntariado = $1 AND ea.estado = 'Presente'
     `;
     const asistenciaResult = await pool.query(asistenciaQuery, [id]);
-    const asistentesVoluntarios = parseInt(asistenciaResult.rows[0].asistentes_voluntarios) || 0;
+    const asistentesVoluntarios = parseInt(asistenciaResult.rows[0].asistentes_voluntarios, 10) || 0;
 
     // Calcular el porcentaje de participación
-    let porcentajeParticipacion = 0;
-    if (totalVoluntarios > 0) {
-      porcentajeParticipacion = (asistentesVoluntarios / totalVoluntarios) * 100;
-    }
+    const porcentajeParticipacion = totalVoluntarios > 0
+      ? (asistentesVoluntarios / totalVoluntarios) * 100
+      : 0;
 
     res.status(200).json({
       porcentajeParticipacion: porcentajeParticipacion.toFixed(2),
@@ -1457,6 +1451,7 @@ app.get('/voluntariados/:id/evidencias/calculos', authenticateToken, async (req,
     res.status(500).json({ message: 'Error al calcular valores' });
   }
 });
+
 
 app.delete('/voluntariados/evidencias/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
@@ -1479,24 +1474,25 @@ app.delete('/voluntariados/evidencias/:id', authenticateToken, async (req, res) 
   }
 });
 
-
-
-
-
-
-
-
-
-
+///////// ASISTENCIAS /////////////////////
 
 
 app.get('/voluntariados/:id/asistencias', authenticateToken, async (req, res) => {
   const { id } = req.params;
+
   try {
     const query = `
-      SELECT id, fecha_asistencia, total_asistentes
-      FROM asistencias
-      WHERE id_voluntariado = $1
+      SELECT 
+        a.id,
+        a.id_voluntariado,
+        a.fecha_asistencia,
+        a.nombre_sesion,
+        COUNT(ea.estado) AS total_asistentes
+      FROM asistencias a
+      LEFT JOIN estado_asistencia ea 
+      ON a.id = ea.asistencia_id AND ea.estado = 'Presente'
+      WHERE a.id_voluntariado = $1
+      GROUP BY a.id;
     `;
     const result = await pool.query(query, [id]);
     res.json(result.rows);
@@ -1507,8 +1503,140 @@ app.get('/voluntariados/:id/asistencias', authenticateToken, async (req, res) =>
 });
 
 
+app.post('/voluntariados/:id/asistencias', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { fecha_asistencia, nombre_sesion, estados } = req.body;
+
+  try {
+    // Insertar la sesión de asistencia
+    const asistenciaQuery = `
+      INSERT INTO asistencias (id_voluntariado, fecha_asistencia, nombre_sesion)
+      VALUES ($1, $2, $3)
+      RETURNING id;
+    `;
+    const asistenciaResult = await pool.query(asistenciaQuery, [id, fecha_asistencia, nombre_sesion]);
+    const asistenciaId = asistenciaResult.rows[0].id;
+
+    // Insertar los estados de los voluntarios
+    const estadoQuery = `
+      INSERT INTO estado_asistencia (asistencia_id, voluntario_id, estado)
+      VALUES ($1, $2, $3);
+    `;
+    for (const estado of estados) {
+      await pool.query(estadoQuery, [asistenciaId, estado.voluntario_id, estado.estado]);
+    }
+
+    res.status(201).json({ message: 'Asistencia registrada exitosamente' });
+  } catch (error) {
+    console.error('Error al registrar asistencia:', error);
+    res.status(500).json({ message: 'Error en el servidor' });
+  }
+});
+
+app.get('/voluntariados/asistencias/:id/detalle', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Obtener los detalles de la asistencia
+    const asistenciaQuery = `
+      SELECT id, fecha_asistencia, nombre_sesion
+      FROM asistencias
+      WHERE id = $1
+    `;
+    const asistenciaResult = await pool.query(asistenciaQuery, [id]);
+    const asistencia = asistenciaResult.rows[0];
+
+    if (!asistencia) {
+      return res.status(404).json({ message: 'Asistencia no encontrada' });
+    }
+
+    // Obtener los voluntarios y sus estados, incluyendo el voluntario_id
+    const voluntariosQuery = `
+      SELECT v.id AS voluntario_id, v.nombre, ea.estado
+      FROM estado_asistencia ea
+      INNER JOIN voluntarios v ON ea.voluntario_id = v.id
+      WHERE ea.asistencia_id = $1
+    `;
+    const voluntariosResult = await pool.query(voluntariosQuery, [id]);
+
+    res.status(200).json({
+      asistencia,
+      voluntarios: voluntariosResult.rows,
+    });
+  } catch (error) {
+    console.error('Error al obtener los detalles de la asistencia:', error);
+    res.status(500).json({ message: 'Error en el servidor' });
+  }
+});
 
 
+app.put('/voluntariados/asistencias/:id', authenticateToken, async (req, res) => { 
+  const { id } = req.params;
+  const { fecha, nombreSesion, estados } = req.body;
+
+  try {
+    // Actualizar datos de la asistencia
+    const updateAsistenciaQuery = `
+      UPDATE asistencias
+      SET fecha_asistencia = $1, nombre_sesion = $2
+      WHERE id = $3
+    `;
+    await pool.query(updateAsistenciaQuery, [fecha, nombreSesion, id]);
+
+    // Actualizar estados de los voluntarios
+    const deleteEstadosQuery = `DELETE FROM estado_asistencia WHERE asistencia_id = $1`;
+    await pool.query(deleteEstadosQuery, [id]);
+
+    const insertEstadoQuery = `
+      INSERT INTO estado_asistencia (asistencia_id, voluntario_id, estado)
+      VALUES ($1, $2, $3)
+    `;
+    for (const estado of estados) {
+      await pool.query(insertEstadoQuery, [id, estado.voluntario_id, estado.estado]);
+    }
+
+    res.status(200).json({ message: 'Asistencia actualizada exitosamente' });
+  } catch (error) {
+    console.error('Error al actualizar asistencia:', error);
+    res.status(500).json({ message: 'Error al actualizar asistencia' });
+  }
+});
+
+
+
+
+
+
+
+app.get('/voluntariados/:id/voluntarios', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const query = `
+      SELECT 
+        v.id,
+        v.dni,
+        v.nombre,
+        v.apellido_paterno,
+        v.apellido_materno,
+        v.correo,
+        v.celular,
+        v.ciudad_residencia,
+        v.rol,
+        v.area,
+        v.categoria,
+        v.grado_instruccion,
+        v.carrera
+      FROM voluntarios v
+      INNER JOIN voluntarios_asignados va ON va.id_voluntario = v.id
+      WHERE va.id_voluntariado = $1
+    `;
+    const result = await pool.query(query, [id]);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error al obtener voluntarios asignados:', error);
+    res.status(500).json({ message: 'Error en el servidor' });
+  }
+});
 
 
 
