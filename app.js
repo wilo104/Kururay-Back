@@ -23,16 +23,23 @@ app.use(bodyParser.json());
 app.use(cors());  // Permitir solicitudes desde cualquier origen (ajustar en producción)
 
 // Conexión a PostgreSQL con manejo de errores
+// const pool = new Pool({
+//   user: process.env.DB_USER,
+//   host: process.env.DB_HOST,
+//   database: process.env.DB_DATABASE,
+//   password: process.env.DB_PASSWORD,
+//   port: process.env.DB_PORT,
+//   max: 30,  // Máximo 30 conexiones simultáneas
+//   idleTimeoutMillis: 30000,  // Cierra conexiones inactivas
+//   connectionTimeoutMillis: 2000,  // Tiempo máximo de espera
+// });
 const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_DATABASE,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT,
-  max: 30,  // Máximo 30 conexiones simultáneas
-  idleTimeoutMillis: 30000,  // Cierra conexiones inactivas
-  connectionTimeoutMillis: 2000,  // Tiempo máximo de espera
+  connectionString: process.env.DATABASE_URL, // Usa la URL completa proporcionada por Heroku
+  ssl: {
+    rejectUnauthorized: false, // Necesario para la conexión con Heroku Postgres
+  },
 });
+
 
 pool.connect()
   .then(() => console.log('✅ Base de datos conectada correctamente'))
