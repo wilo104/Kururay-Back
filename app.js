@@ -84,7 +84,7 @@ app.post('/login', async (req, res) => {
       process.env.JWT_SECRET || 'tu_secreto_secreto'
     );
 
-    console.log(`Usuario ${dni} debe cambiar su contraseña: ${isClaveDni}`);
+    // console.log(`Usuario ${dni} debe cambiar su contraseña: ${isClaveDni}`);
 
     return res.json({
       token,
@@ -795,7 +795,7 @@ app.put('/voluntarios/:id/estado', async (req, res) => {
 app.get('/voluntarios/unico/:id', authenticateToken, async (req, res) => {
   const voluntarioId = req.params.id;
 
-  console.log(`ID recibido: ${voluntarioId}`); // Log para depuración
+  // console.log(`ID recibido: ${voluntarioId}`); // Log para depuración
 
   try {
     const query = `
@@ -808,7 +808,7 @@ app.get('/voluntarios/unico/:id', authenticateToken, async (req, res) => {
     `;
     const result = await pool.query(query, [voluntarioId]);
 
-    console.log('Resultados de la consulta:', result.rows); // Log para depuración
+    // console.log('Resultados de la consulta:', result.rows); // Log para depuración
 
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Voluntario no encontrado.' });
@@ -1025,7 +1025,7 @@ app.get('/voluntarios/feedback/:id_voluntario/:id_voluntariado', async (req, res
     return res.status(400).json({ message: 'Faltan parámetros requeridos: id_voluntario o id_voluntariado.' });
   }
 
-  console.log('Parámetros recibidos:', id_voluntario, id_voluntariado);
+  // console.log('Parámetros recibidos:', id_voluntario, id_voluntariado);
 
   try {
     const query = `
@@ -1047,7 +1047,7 @@ app.get('/voluntarios/feedback/:id_voluntario/:id_voluntariado', async (req, res
 
     const feedbacks = await pool.query(query, [id_voluntario, id_voluntariado]);
 
-    console.log('Resultados de la consulta:', feedbacks.rows);
+    // console.log('Resultados de la consulta:', feedbacks.rows);
 
     // Si no hay feedbacks, devolver un array vacío con código 200
     res.status(200).json({ feedbacks: feedbacks.rows });
@@ -2710,7 +2710,7 @@ app.get('/voluntarios/feedback/:id_voluntario/:id_voluntariado', async (req, res
     return res.status(400).json({ message: 'Faltan parámetros requeridos: id_voluntario o id_voluntariado.' });
   }
 
-  console.log('Parámetros recibidos:', id_voluntario, id_voluntariado);
+  // console.log('Parámetros recibidos:', id_voluntario, id_voluntariado);
 
   try {
     const query = `
@@ -2732,7 +2732,7 @@ app.get('/voluntarios/feedback/:id_voluntario/:id_voluntariado', async (req, res
 
     const feedbacks = await pool.query(query, [id_voluntario, id_voluntariado]);
 
-    console.log('Resultados de la consulta:', feedbacks.rows);
+    // console.log('Resultados de la consulta:', feedbacks.rows);
 
     // Si no hay feedbacks, devolver un array vacío con código 200
     res.status(200).json({ feedbacks: feedbacks.rows });
@@ -2912,7 +2912,7 @@ app.post('/ingresos', authenticateToken, async (req, res) => {
     ubicacion_actual,
   } = req.body;
 
-  console.log('Datos recibidos en el backend:', req.body); // <-- Depuración
+  // console.log('Datos recibidos en el backend:', req.body); // <-- Depuración
 
   try {
     // Validar campos obligatorios generales
@@ -2972,7 +2972,7 @@ app.post('/ingresos', authenticateToken, async (req, res) => {
 
     // Ejecución de la consulta en la base de datos
     const result = await pool.query(query, values);
-    console.log('Ingreso registrado exitosamente:', result.rows[0]); // <-- Depuración
+    // console.log('Ingreso registrado exitosamente:', result.rows[0]); // <-- Depuración
 
     res.status(201).json({
       message: 'Ingreso registrado exitosamente.',
@@ -3066,7 +3066,7 @@ app.put('/ingresos/:id', authenticateToken, async (req, res) => {
     ubicacion_actual,
   } = req.body;
 
-  console.log('Datos recibidos en el backend:', req.body);
+  // console.log('Datos recibidos en el backend:', req.body);
 
   // Validaciones generales
   if (!tipo_ingreso || !concepto || !fecha_ingreso || !codigo_certificado || !benefactor_id) {
@@ -3117,8 +3117,8 @@ app.put('/ingresos/:id', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Tipo de ingreso no válido.' });
     }
 
-    console.log('Campos para la consulta:', query);
-    console.log('Valores para la consulta:', values);
+    // console.log('Campos para la consulta:', query);
+    // console.log('Valores para la consulta:', values);
 
     const result = await pool.query(query, values);
 
@@ -3126,7 +3126,7 @@ app.put('/ingresos/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Ingreso no encontrado.' });
     }
 
-    console.log('Ingreso actualizado exitosamente:', result.rows[0]);
+    // console.log('Ingreso actualizado exitosamente:', result.rows[0]);
     res.status(200).json({ message: 'Ingreso actualizado exitosamente.', ingreso: result.rows[0] });
   } catch (error) {
     console.error('Error al actualizar ingreso:', error);
@@ -3181,7 +3181,7 @@ app.post('/ingresos/:ingresoId/productos', authenticateToken, async (req, res) =
     estado,
   } = req.body;
 
-  console.log('Datos recibidos en el backend:', req.body);
+  // console.log('Datos recibidos en el backend:', req.body);
 
   try {
     // Validar campos obligatorios
@@ -3280,7 +3280,7 @@ app.put('/ingresos/:ingresoId/productos/:productoId', authenticateToken, async (
     estado,
   } = req.body;
 
-  console.log('Datos recibidos para actualizar:', req.body);
+  // console.log('Datos recibidos para actualizar:', req.body);
 
   try {
     // Validar campos obligatorios comunes
@@ -3546,6 +3546,58 @@ app.put('/gastos/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ message: 'Error al actualizar el gasto.' });
   }
 });
+
+
+
+app.put('/restaurar-contrasena', authenticateToken, async (req, res) => {
+  const { tabla, id } = req.body; // Recibe la tabla y el id desde el frontend
+
+  try {
+    // Validar que solo se permita modificar en las tablas permitidas
+    if (!['usuarios', 'voluntarios'].includes(tabla)) {
+      return res.status(400).json({ message: 'Tabla no permitida.' });
+    }
+
+    // Validar que el ID sea un número válido
+    if (!id || isNaN(id)) {
+      return res.status(400).json({ message: 'ID inválido.' });
+    }
+
+    // Obtener el DNI del registro
+    const queryObtenerDNI = `SELECT dni FROM ${tabla} WHERE id = $1`;
+    const resultado = await pool.query(queryObtenerDNI, [id]);
+
+    if (resultado.rows.length === 0) {
+      return res.status(404).json({ message: 'Registro no encontrado.' });
+    }
+
+    const dni = resultado.rows[0].dni; // Extrae el DNI del registro
+
+    // Encriptar la nueva contraseña (DNI)
+    const saltRounds = 10; // Número de rondas de sal
+    const passwordEncriptado = await bcrypt.hash(dni, saltRounds);
+
+    // Actualizar la contraseña en la base de datos
+    const queryActualizar = `
+      UPDATE ${tabla}
+      SET password = $1
+      WHERE id = $2
+    `;
+    const resultadoActualizar = await pool.query(queryActualizar, [passwordEncriptado, id]);
+
+    if (resultadoActualizar.rowCount === 0) {
+      return res.status(404).json({ message: 'No se pudo actualizar la contraseña.' });
+    }
+
+    res.status(200).json({ message: 'Contraseña restaurada correctamente.' });
+  } catch (error) {
+    console.error('Error al restaurar contraseña:', error);
+    res.status(500).json({ message: 'Error al restaurar la contraseña.' });
+  }
+});
+
+
+
 
 
 
