@@ -1,3 +1,5 @@
+require('dotenv').config();  // Cargar variables de entorno
+
 const express = require('express');
 const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken');
@@ -8,32 +10,69 @@ const path = require('path');
 const multer = require('multer');
 const fs = require('fs');
 const util = require('util');
-
+const helmet = require('helmet');
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
+// Seguridad con Helmet
+app.use(helmet());
+
+// Middleware
 app.use(bodyParser.json());
-app.use(cors());
+app.use(cors());  // Permitir solicitudes desde cualquier origen (ajustar en producción)
 
+// Conexión a PostgreSQL con manejo de errores
 const pool = new Pool({
-    user: 'postgres',
-    host: 'localhost',
-    database: 'bdKururay',
-    password: 'alohomora',
-    port: 5432,
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_DATABASE,
+  password: process.env.DB_PASSWORD,
+  port: process.env.DB_PORT,
+  max: 30,  // Máximo 30 conexiones simultáneas
+  idleTimeoutMillis: 30000,  // Cierra conexiones inactivas
+  connectionTimeoutMillis: 2000,  // Tiempo máximo de espera
 });
 
+pool.connect()
+  .then(() => console.log('✅ Base de datos conectada correctamente'))
+  .catch(err => console.error('❌ Error al conectar con la base de datos:', err));
+
+// Configuración de Multer para subir archivos
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, 'uploads');
-    },
-    filename: (req, file, cb) => {
-        cb(null, file.fieldname + '-' + Date.now() + path.extname(file.originalname));
-    },
+  destination: function (req, file, cb) {
+      cb(null, path.join(__dirname, 'uploads/'));
+  },
+  filename: function (req, file, cb) {
+      cb(null, Date.now() + '-' + file.originalname);
+  }
 });
-const upload = multer({ storage });
+
+const upload = multer({ storage: storage });
+
+// Lectura de archivos asíncrona
 const readFileAsync = util.promisify(fs.readFile);
+
+// Servir archivos estáticos (solo si existen)
+const publicPath = path.join(__dirname, 'public');
+if (fs.existsSync(publicPath)) {
+    app.use(express.static(publicPath));
+    app.get('*', (req, res) => {
+        res.sendFile(path.join(publicPath, 'index.html'));
+    });
+}
+
+// Middleware global de manejo de errores (debe ir al final)
+app.use((err, req, res, next) => {
+  console.error('❌ Error en el servidor:', err.stack);
+  res.status(500).json({ message: 'Ocurrió un error en el servidor' });
+});
+
+// Iniciar servidor
+app.listen(port, () => {
+  console.log(`🚀 Servidor corriendo en http://localhost:${port}`);
+});
+
 
 app.post('/login', async (req, res) => {
   const { dni, password } = req.body;
@@ -74,14 +113,14 @@ app.post('/login', async (req, res) => {
     }
 
     const isClaveDni = await bcrypt.compare(dni, storedPasswordHash);
-
     const token = jwt.sign(
       {
         id: userQuery.rows[0].id,
         dni: userQuery.rows[0].dni,
         tipo_usuario: isVoluntario ? 'VOLUNTARIO' : userQuery.rows[0].tipo_usuario,
       },
-      process.env.JWT_SECRET || 'tu_secreto_secreto'
+      process.env.JWT_SECRET || 'default_secret', // Usar un valor por defecto seguro
+      { expiresIn: '1h' } // Configurar expiración del token
     );
 
     // console.log(`Usuario ${dni} debe cambiar su contraseña: ${isClaveDni}`);
@@ -143,7 +182,7 @@ app.post('/login', async (req, res) => {
 //           dni: userQuery.rows[0].dni,
 //           tipo_usuario: 'VOLUNTARIO',
 //         },
-//         process.env.JWT_SECRET || 'tu_secreto_secreto'
+//         process.env.JWT_SECRET || 'process.env.JWT_SECRET'
 //       );
 
 //       return res.json({
@@ -172,7 +211,7 @@ app.post('/login', async (req, res) => {
 //         dni: userQuery.rows[0].dni,
 //         tipo_usuario: userQuery.rows[0].tipo_usuario,
 //       },
-//       process.env.JWT_SECRET || 'tu_secreto_secreto'
+//       process.env.JWT_SECRET || 'process.env.JWT_SECRET'
 //     );
 
 //     res.json({
@@ -1283,32 +1322,63 @@ app.put('/variables-sistema/:id', async (req, res) => {
 
 // *************SECCION VOLUTARIADOS****************
 
-function authenticateToken(req, res, next) {
-  const token = req.get('Authorization')?.split(' ')[1];
-  // const token = authHeader ? authHeader.split(' ')[1] : undefined;
+// function authenticateToken(req, res, next) {
+//   const token = req.get('Authorization')?.split(' ')[1];
+//   // const token = authHeader ? authHeader.split(' ')[1] : undefined;
 
+//   if (!token) {
+//     console.warn('Token no proporcionado');
+//     return res.status(401).json({ message: 'Token no proporcionado' });
+//   }
+
+//   jwt.verify(token, process.env.JWT_SECRET || 'process.env.JWT_SECRET', (err, user) => {
+//     if (err) {
+//       console.error('Error de verificación de token:', err);
+//       return res.status(403).json({ message: 'Token no válido' });
+//     }
+
+
+
+//     if (!user || !user.id || !user.tipo_usuario) {
+//       console.warn('Información incompleta en el token:', user);
+//       return res.status(403).json({ message: 'El token no contiene información completa del usuario' });
+//     }
+
+//     req.user = user; // Almacenar el usuario decodificado
+//     next();
+//   });
+// }
+function authenticateToken(req, res, next) {
+  // Obtiene el header Authorization
+  const authHeader = req.get('Authorization');
+  const token = authHeader?.split(' ')[1]; // Extrae el token después de "Bearer"
+console.log(token);
+  // Si no hay token, responde con un error
   if (!token) {
     console.warn('Token no proporcionado');
     return res.status(401).json({ message: 'Token no proporcionado' });
   }
 
-  jwt.verify(token, process.env.JWT_SECRET || 'tu_secreto_secreto', (err, user) => {
+  // Verifica el token
+  const jwtSecret = process.env.JWT_SECRET || 'default_secret';
+  jwt.verify(token, jwtSecret, (err, user) => {
     if (err) {
-      console.error('Error de verificación de token:', err);
-      return res.status(403).json({ message: 'Token no válido' });
+      console.error('Error de verificación de token:', err.message);
+      return res.status(403).json({ message: 'Token no válido o expirado' });
     }
 
-
-
+    // Valida que el token decodificado contiene la información requerida
     if (!user || !user.id || !user.tipo_usuario) {
       console.warn('Información incompleta en el token:', user);
       return res.status(403).json({ message: 'El token no contiene información completa del usuario' });
     }
 
-    req.user = user; // Almacenar el usuario decodificado
+    // Almacena el usuario decodificado en req.user para su uso posterior
+    req.user = user;
     next();
   });
 }
+
 
 module.exports = authenticateToken;
 
@@ -3603,6 +3673,3 @@ app.put('/restaurar-contrasena', authenticateToken, async (req, res) => {
 
 module.exports = app;
 
-app.listen(port, () => {
-  console.log(`Servidor escuchando en http://localhost:${port}`);
-});
