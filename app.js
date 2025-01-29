@@ -80,6 +80,10 @@ app.listen(port, () => {
   console.log(`🚀 Servidor corriendo en http://localhost:${port}`);
 });
 
+app.get('/', (req, res) => {
+  res.send('¡Bienvenido a mi API!');
+});
+
 
 app.post('/login', async (req, res) => {
   const { dni, password } = req.body;
