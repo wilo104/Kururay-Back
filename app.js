@@ -94,8 +94,8 @@ app.post('/login', async (req, res) => {
     }
 
     let userQuery = await pool.query(
-      `SELECT id, dni, password, tipo_usuario, estado_usuario, 
-      (nombre || ' ' || apellido_paterno || ' ' || apellido_materno) AS nombre_completo 
+      `SELECT id, dni, password, tipo_usuario, estado_usuario,
+      (nombre || ' ' || apellido_paterno || ' ' || apellido_materno) AS nombre_completo
       FROM usuarios WHERE dni = $1`,
       [dni]
     );
@@ -104,8 +104,8 @@ app.post('/login', async (req, res) => {
 
     if (userQuery.rows.length === 0) {
       userQuery = await pool.query(
-        `SELECT id, dni, password, 
-        (nombre || ' ' || apellido_paterno || ' ' || apellido_materno) AS nombre_completo 
+        `SELECT id, dni, password,
+        (nombre || ' ' || apellido_paterno || ' ' || apellido_materno) AS nombre_completo
         FROM voluntarios WHERE dni = $1`,
         [dni]
       );
@@ -160,8 +160,8 @@ app.post('/login', async (req, res) => {
 
 //     // Consultar en la tabla usuarios
 //     let userQuery = await pool.query(
-//       `SELECT id, dni, password, tipo_usuario, estado_usuario, 
-//       (nombre || ' ' || apellido_paterno || ' ' || apellido_materno) AS nombre_completo 
+//       `SELECT id, dni, password, tipo_usuario, estado_usuario,
+//       (nombre || ' ' || apellido_paterno || ' ' || apellido_materno) AS nombre_completo
 //       FROM usuarios WHERE dni = $1`,
 //       [dni]
 //     );
@@ -169,8 +169,8 @@ app.post('/login', async (req, res) => {
 //     if (userQuery.rows.length === 0) {
 //       // Si no se encuentra en `usuarios`, buscar en `voluntarios`
 //       userQuery = await pool.query(
-//         `SELECT id, dni, password, 
-//         (nombre || ' ' || apellido_paterno || ' ' || apellido_materno) AS nombre_completo 
+//         `SELECT id, dni, password,
+//         (nombre || ' ' || apellido_paterno || ' ' || apellido_materno) AS nombre_completo
 //         FROM voluntarios WHERE dni = $1`,
 //         [dni]
 //       );
@@ -309,7 +309,7 @@ app.post('/usuarios/registro', upload.single('cv'), async (req, res) => {
 
     // Si hay un archivo, puedes guardarlo en otra tabla o procesarlo aquí
     if (req.file) {
-    
+
       // Por ejemplo, guardar la ruta del archivo en la base de datos
     }
 
@@ -459,7 +459,7 @@ app.patch('/usuarios/:id/estado', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Usuario no encontrado.' });
     }
 
-    res.status(200).json({ 
+    res.status(200).json({
       message: `Estado cambiado a ${estado_usuario ? 'ACTIVO' : 'INACTIVO'}`,
       usuario: result.rows[0] // Devuelve el usuario actualizado como respuesta
     });
@@ -474,10 +474,28 @@ app.patch('/usuarios/:id/estado', authenticateToken, async (req, res) => {
 
 // *************SECCION VOLUNTARIOS ****************
 
+// app.get('/voluntarios', async (req, res) => {
+//   try {
+//     const query = `
+//       SELECT *FROM voluntarios
+//     `;
+//     const result = await pool.query(query);
+
+//     if (result.rows.length === 0) {
+//       return res.status(404).json({ message: 'No se encontraron voluntarios' });
+//     }
+
+//     res.status(200).json(result.rows);
+//   } catch (error) {
+//     console.error('Error al obtener voluntarios:', error);
+//     res.status(500).json({ message: 'Error en el servidor al obtener los voluntarios' });
+//   }
+// });
 app.get('/voluntarios', async (req, res) => {
   try {
     const query = `
-      SELECT *FROM voluntarios
+      SELECT id, apellido_paterno, apellido_materno, nombre, dni, correo, celular, estado_voluntario 
+      FROM voluntarios
     `;
     const result = await pool.query(query);
 
@@ -736,7 +754,7 @@ app.put('/voluntarios/:id', upload.single('cv'), async (req, res) => {
   try {
     const query = `
       UPDATE voluntarios
-      SET 
+      SET
         nombre = $1,
         apellido_paterno = $2,
         apellido_materno = $3,
@@ -840,7 +858,7 @@ app.put('/voluntarios/:id/estado', async (req, res) => {
 });
 
 
-//RUTA PARA ACTUALIZAR VOLUNTARIO DESDE SU PROPIA VISTA 
+//RUTA PARA ACTUALIZAR VOLUNTARIO DESDE SU PROPIA VISTA
 
 app.get('/voluntarios/unico/:id', authenticateToken, async (req, res) => {
   const voluntarioId = req.params.id;
@@ -849,11 +867,11 @@ app.get('/voluntarios/unico/:id', authenticateToken, async (req, res) => {
 
   try {
     const query = `
-      SELECT 
-        id, dni, nombre, apellido_paterno, apellido_materno, correo, 
-        ciudad_residencia, celular, grado_instruccion, instagram, facebook, linkedin, 
+      SELECT
+        id, dni, nombre, apellido_paterno, apellido_materno, correo,
+        ciudad_residencia, celular, grado_instruccion, instagram, facebook, linkedin,
         fecha_ingreso, fecha_nacimiento, categoria, area, rol, carrera
-      FROM voluntarios 
+      FROM voluntarios
       WHERE id = $1
     `;
     const result = await pool.query(query, [voluntarioId]);
@@ -885,15 +903,15 @@ app.put('/voluntarios/unico/:id', authenticateToken, async (req, res) => {
 
   try {
     const query = `
-      UPDATE voluntarios 
-      SET 
-        ciudad_residencia = $1, 
-        celular = $2, 
-        grado_instruccion = $3, 
-        instagram = $4, 
-        facebook = $5, 
+      UPDATE voluntarios
+      SET
+        ciudad_residencia = $1,
+        celular = $2,
+        grado_instruccion = $3,
+        instagram = $4,
+        facebook = $5,
         linkedin = $6
-      WHERE id = $7 
+      WHERE id = $7
       RETURNING *;
     `;
     const values = [
@@ -985,7 +1003,7 @@ app.get('/voluntarios/:id/historial', async (req, res) => {
   try {
     const query = `
     (
-      SELECT 
+      SELECT
         hv.id_voluntariado AS id_voluntariado,
         hv.nombre_voluntariado AS nombre_voluntariado,
         hv.lugar,
@@ -993,9 +1011,9 @@ app.get('/voluntarios/:id/historial', async (req, res) => {
         hv.fecha_cierre,
         hv.estado,
         hv.logros
-      FROM 
+      FROM
         historial_voluntariados hv
-      WHERE 
+      WHERE
         EXISTS (
           SELECT 1
           FROM jsonb_array_elements(hv.voluntarios::jsonb) obj
@@ -1004,7 +1022,7 @@ app.get('/voluntarios/:id/historial', async (req, res) => {
     )
     UNION ALL
     (
-      SELECT 
+      SELECT
         v.id AS id_voluntariado,
         v.nombre AS nombre_voluntariado,
         v.lugar,
@@ -1012,19 +1030,19 @@ app.get('/voluntarios/:id/historial', async (req, res) => {
         NULL AS fecha_cierre,
         ev.estado,
         NULL AS logros
-      FROM 
+      FROM
         voluntariados v
-      JOIN 
+      JOIN
         (
           SELECT DISTINCT ON (id_voluntariado) id_voluntariado, estado
           FROM estados_voluntariado
           ORDER BY id_voluntariado, fecha DESC
-        ) ev 
+        ) ev
         ON ev.id_voluntariado = v.id
-      JOIN 
+      JOIN
         voluntarios_asignados va ON v.id = va.id_voluntariado
-      WHERE 
-        va.id_voluntario = $1 
+      WHERE
+        va.id_voluntario = $1
         AND ev.estado != 'Cerrado'
     )
     ORDER BY fecha_cierre DESC NULLS LAST;
@@ -1066,7 +1084,7 @@ app.get('/dashboard/estadisticas', authenticateToken, async (req, res) => {
 });
 
 
-//obtener feefback voluntariado logueado vs voluntariados asignados 
+//obtener feefback voluntariado logueado vs voluntariados asignados
 
 app.get('/voluntarios/feedback/:id_voluntario/:id_voluntariado', async (req, res) => {
   const { id_voluntario, id_voluntariado } = req.params;
@@ -1079,19 +1097,19 @@ app.get('/voluntarios/feedback/:id_voluntario/:id_voluntariado', async (req, res
 
   try {
     const query = `
-      SELECT 
-        f.id, 
-        f.fecha, 
-        f.adicional, 
-        f.mentor, 
-        f.descripcion, 
+      SELECT
+        f.id,
+        f.fecha,
+        f.adicional,
+        f.mentor,
+        f.descripcion,
         f.tipo
-      FROM 
+      FROM
         feedback f
-      WHERE 
+      WHERE
         f.id_voluntario = $1
         AND f.id_voluntariado = $2
-      ORDER BY 
+      ORDER BY
         f.fecha DESC;
     `;
 
@@ -1118,7 +1136,7 @@ app.get('/voluntarios/feedback/:id_voluntario/:id_voluntariado', async (req, res
 
 //   try {
 //     const query = `
-//       SELECT 
+//       SELECT
 //         fb.id AS feedback_id,
 //         fb.fecha AS feedback_fecha,
 //         fb.descripcion,
@@ -1155,7 +1173,7 @@ app.get('/voluntarios/:id/feedback', async (req, res) => {
 
   try {
     const query = `
-      SELECT 
+      SELECT
         fb.id AS feedback_id,
         fb.fecha AS feedback_fecha,
         fb.descripcion,
@@ -1164,13 +1182,13 @@ app.get('/voluntarios/:id/feedback', async (req, res) => {
         fb.mentor,
         fb.id_voluntariado AS voluntariado_id,
         v.nombre AS voluntariado_nombre
-      FROM 
+      FROM
         feedback fb
-      JOIN 
+      JOIN
         voluntariados v ON fb.id_voluntariado = v.id
-      WHERE 
+      WHERE
         fb.id_voluntario = $1
-      ORDER BY 
+      ORDER BY
         fb.fecha DESC;
     `;
 
@@ -1403,18 +1421,18 @@ app.get('/voluntariados', authenticateToken, async (req, res) => {
     }
 
     const query = `
-      SELECT 
-          v.id, 
-          v.nombre, 
-          v.tipo, 
-          v.fecha_inicio, 
+      SELECT
+          v.id,
+          v.nombre,
+          v.tipo,
+          v.fecha_inicio,
           v.estado_alta
       FROM voluntariados v
       ORDER BY v.fecha_inicio DESC;
     `;
 
     const result = await pool.query(query); // Ejecuta la consulta
- 
+
     // Si no hay resultados, puedes manejarlo de manera adecuada
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'No se encontraron voluntariados' });
@@ -1550,7 +1568,7 @@ app.post('/voluntariados/:id/aprobar', authenticateToken, async (req, res) => {
 //   }
 // });
 
-app.post('/voluntariados/:id/cerrar', authenticateToken, async (req, res) => { 
+app.post('/voluntariados/:id/cerrar', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { presupuestoEjecutado, logros } = req.body;
 
@@ -1615,7 +1633,7 @@ app.get('/voluntariados/:id/historial', authenticateToken, async (req, res) => {
   try {
     // Verificar si el historial del voluntariado existe
     const historial = await pool.query(
-      `SELECT 
+      `SELECT
         hv.id_voluntariado,
         hv.nombre,
         hv.tipo,
@@ -1916,14 +1934,14 @@ app.get('/voluntariados/:id/asistencias', authenticateToken, async (req, res) =>
 
   try {
     const query = `
-      SELECT 
+      SELECT
         a.id,
         a.id_voluntariado,
         a.fecha_asistencia,
         a.nombre_sesion,
         COUNT(ea.estado) AS total_asistentes
       FROM asistencias a
-      LEFT JOIN estado_asistencia ea 
+      LEFT JOIN estado_asistencia ea
       ON a.id = ea.asistencia_id AND ea.estado = 'Presente'
       WHERE a.id_voluntariado = $1
       GROUP BY a.id;
@@ -2004,7 +2022,7 @@ app.get('/voluntariados/asistencias/:id/detalle', authenticateToken, async (req,
 });
 
 
-app.put('/voluntariados/asistencias/:id', authenticateToken, async (req, res) => { 
+app.put('/voluntariados/asistencias/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { fecha, nombreSesion, estados } = req.body;
 
@@ -2046,7 +2064,7 @@ app.get('/voluntariados/:id/voluntarios', authenticateToken, async (req, res) =>
   const { id } = req.params;
   try {
     const query = `
-      SELECT 
+      SELECT
         v.id,
         v.dni,
         v.nombre,
@@ -2103,7 +2121,7 @@ app.put('/voluntariados/:id', authenticateToken, async (req, res) => {
     }
 
     const query = `
-      UPDATE voluntariados 
+      UPDATE voluntariados
       SET nombre = $1, -- Agregamos el campo 'nombre' a la consulta
           tipo = $2,
           fecha_inicio = $3,
@@ -2150,7 +2168,7 @@ app.put('/voluntariados/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Voluntariado no encontrado' });
     }
 
-    
+
 
     res.status(200).json({ message: 'Voluntariado actualizado correctamente', data: result.rows[0] });
   } catch (error) {
@@ -2264,22 +2282,22 @@ app.get('/voluntariados/:voluntariadoId/voluntarios', authenticateToken, async (
 
   try {
     const query = `
-      SELECT 
+      SELECT
         v.id AS id_voluntario,
         v.nombre,
         v.apellido_paterno,
         v.apellido_materno,
         va.fecha_asignacion
-      FROM 
+      FROM
         voluntarios_asignados va
-      JOIN 
+      JOIN
         voluntarios v ON va.id_voluntario = v.id
-      WHERE 
+      WHERE
         va.id_voluntariado = $1
     `;
 
     const result = await pool.query(query, [voluntariadoId]);
-   
+
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'No hay voluntarios asignados para este voluntariado' });
     }
@@ -2327,8 +2345,8 @@ app.delete('/voluntariados/:voluntariadoId/voluntarios/:voluntarioId', authentic
 app.get('/benefactores', authenticateToken, async (req, res) => {
   try {
     const query = `
-      SELECT id, nombre, tipo, nombre_contacto, celular_contacto, direccion, 
-             razon_social, ruc, dni 
+      SELECT id, nombre, tipo, nombre_contacto, celular_contacto, direccion,
+             razon_social, ruc, dni
       FROM benefactores
     `;
     const result = await pool.query(query);
@@ -2393,8 +2411,8 @@ app.get('/benefactores/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
     const query = `
-      SELECT id, nombre, tipo, nombre_contacto, celular_contacto, direccion, razon_social, ruc , dni 
-      FROM benefactores 
+      SELECT id, nombre, tipo, nombre_contacto, celular_contacto, direccion, razon_social, ruc , dni
+      FROM benefactores
       WHERE id = $1
     `;
     const result = await pool.query(query, [id]);
@@ -2552,7 +2570,7 @@ app.post('/beneficiarios', authenticateToken, async (req, res) => {
       RETURNING *;
     `;
     const values = [tipo, nombre, direccion, telefono, email, genero, edad, representante, ruc, comentarios, dni];
-  
+
 
     const result = await pool.query(query, values);
     res.status(201).json({
@@ -2612,7 +2630,7 @@ app.put('/beneficiarios/:id', authenticateToken, async (req, res) => {
         message: 'Los beneficiarios tipo "Persona" requieren nombre, género, edad y DNI.',
       });
     }
-    
+
 
     if (tipo === 'Comunidad' && (!nombre || !representante)) {
       return res.status(400).json({
@@ -2634,7 +2652,7 @@ app.put('/beneficiarios/:id', authenticateToken, async (req, res) => {
     RETURNING *;
   `;
   const values = [tipo, nombre, direccion, telefono, email, genero, edad, representante, ruc, comentarios, dni, id];
-  
+
 
     const result = await pool.query(query, values);
     if (result.rowCount === 0) {
@@ -2721,7 +2739,7 @@ app.post('/beneficiarios/:id/interacciones', authenticateToken, async (req, res)
 //   }
 // });
 app.post('/voluntarios/feedback', authenticateToken, async (req, res) => {
-  
+
   const { id_voluntario, id_voluntariado, fecha, adicional, mentor, descripcion, tipo } = req.body;
 
   try {
@@ -2795,19 +2813,19 @@ app.get('/voluntarios/feedback/:id_voluntario/:id_voluntariado', async (req, res
 
   try {
     const query = `
-      SELECT 
-        f.id, 
-        f.fecha, 
-        f.adicional, 
-        f.mentor, 
-        f.descripcion, 
+      SELECT
+        f.id,
+        f.fecha,
+        f.adicional,
+        f.mentor,
+        f.descripcion,
         f.tipo
-      FROM 
+      FROM
         feedback f
-      WHERE 
+      WHERE
         f.id_voluntario = $1
         AND f.id_voluntariado = $2
-      ORDER BY 
+      ORDER BY
         f.fecha DESC;
     `;
 
@@ -2899,11 +2917,11 @@ app.put('/voluntarios/feedback/:id', authenticateToken, async (req, res) => {
 //     // Actualizar el feedback con los datos proporcionados
 //     const query = `
 //       UPDATE feedback
-//       SET 
-//         fecha = $1, 
-//         adicional = $2, 
-//         mentor = $3, 
-//         descripcion = $4, 
+//       SET
+//         fecha = $1,
+//         adicional = $2,
+//         mentor = $3,
+//         descripcion = $4,
 //         tipo = $5,
 //         id_voluntariado = $6
 //       WHERE id = $7
@@ -3069,7 +3087,7 @@ app.post('/ingresos', authenticateToken, async (req, res) => {
 app.get('/ingresos', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(`
-     SELECT ingresos.*, 
+     SELECT ingresos.*,
        benefactores.nombre AS benefactor_nombre,
        COALESCE(v.nombre, 'Sin Asignar') AS voluntariado_asignado
         FROM ingresos
@@ -3224,7 +3242,7 @@ app.get('/ingresos/:id', authenticateToken, async (req, res) => {
 
   try {
     const result = await pool.query(`
-      SELECT ingresos.*, 
+      SELECT ingresos.*,
              benefactores.nombre AS benefactor_nombre
       FROM ingresos
       LEFT JOIN benefactores ON ingresos.benefactor_id = benefactores.id
@@ -3390,17 +3408,17 @@ app.put('/ingresos/:ingresoId/productos/:productoId', authenticateToken, async (
 
     const query = `
       UPDATE productos
-      SET 
-        nombre_producto = $1, 
-        cantidad = $2, 
-        tipo_unidad = $3, 
-        tipo_producto = $4, 
-        fecha_vencimiento = $5, 
-        registro_sanitario = $6, 
-        motivo = $7, 
-        costo_unidad = $8, 
-        costo_total = $9, 
-        numero_lote = $10, 
+      SET
+        nombre_producto = $1,
+        cantidad = $2,
+        tipo_unidad = $3,
+        tipo_producto = $4,
+        fecha_vencimiento = $5,
+        registro_sanitario = $6,
+        motivo = $7,
+        costo_unidad = $8,
+        costo_total = $9,
+        numero_lote = $10,
         estado = $11
       WHERE ingreso_id = $12 AND id = $13
       RETURNING *;
@@ -3443,7 +3461,7 @@ app.put('/ingresos/:ingresoId/productos/:productoId', authenticateToken, async (
 app.get('/gastos', authenticateToken, async (req, res) => {
   try {
     const query = `
-      SELECT 
+      SELECT
         gastos.id,
         gastos.descripcion,
         gastos.importe,
@@ -3475,7 +3493,7 @@ app.get('/gastos/:id', authenticateToken, async (req, res) => {
 
   try {
     const query = `
-      SELECT 
+      SELECT
         gastos.id,
         gastos.descripcion,
         gastos.importe,
