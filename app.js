@@ -494,7 +494,10 @@ app.patch('/usuarios/:id/estado', authenticateToken, async (req, res) => {
 app.get('/voluntarios', async (req, res) => {
   try {
     const query = `
-      SELECT id, apellido_paterno, apellido_materno, nombre, dni, correo, celular, estado_voluntario 
+     SELECT
+        id, dni, nombre, apellido_paterno, apellido_materno, correo,
+        ciudad_residencia, celular, grado_instruccion, instagram, facebook, linkedin,
+        fecha_ingreso, fecha_nacimiento, categoria, area, rol, carrera
       FROM voluntarios
     `;
     const result = await pool.query(query);
@@ -540,19 +543,19 @@ try {
 }
 });
 
-app.get('/voluntarios/:id', authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  try {
-    const result = await pool.query('SELECT * FROM voluntarios WHERE id = $1', [id]);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'Voluntario no encontrado' });
-    }
-    res.status(200).json(result.rows[0]);
-  } catch (error) {
-    console.error('Error al obtener detalle del voluntario:', error);
-    res.status(500).json({ message: 'Error al obtener detalle del voluntario' });
-  }
-});
+// app.get('/voluntarios/:id', authenticateToken, async (req, res) => {
+//   const { id } = req.params;
+//   try {
+//     const result = await pool.query('SELECT * FROM voluntarios WHERE id = $1', [id]);
+//     if (result.rows.length === 0) {
+//       return res.status(404).json({ message: 'Voluntario no encontrado' });
+//     }
+//     res.status(200).json(result.rows[0]);
+//   } catch (error) {
+//     console.error('Error al obtener detalle del voluntario:', error);
+//     res.status(500).json({ message: 'Error al obtener detalle del voluntario' });
+//   }
+// });
 
 // app.put('/voluntarios/:id/cambiar-contrasena', authenticateToken, async (req, res) => {
 //   const voluntarioId = parseInt(req.params.id); // ID del voluntario pasado en la URL
@@ -591,19 +594,19 @@ app.get('/voluntarios/:id', authenticateToken, async (req, res) => {
 //   }
 // });
 
-app.get('/voluntarios/:id', authenticateToken, async (req, res) => {
-  const { id } = req.params;
-  try {
-    const result = await pool.query('SELECT * FROM voluntarios WHERE id = $1', [id]);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'Voluntario no encontrado' });
-    }
-    res.status(200).json(result.rows[0]);
-  } catch (error) {
-    console.error('Error al obtener detalle del voluntario:', error);
-    res.status(500).json({ message: 'Error al obtener detalle del voluntario' });
-  }
-});
+// app.get('/voluntarios/:id', authenticateToken, async (req, res) => {
+//   const { id } = req.params;
+//   try {
+//     const result = await pool.query('SELECT * FROM voluntarios WHERE id = $1', [id]);
+//     if (result.rows.length === 0) {
+//       return res.status(404).json({ message: 'Voluntario no encontrado' });
+//     }
+//     res.status(200).json(result.rows[0]);
+//   } catch (error) {
+//     console.error('Error al obtener detalle del voluntario:', error);
+//     res.status(500).json({ message: 'Error al obtener detalle del voluntario' });
+//   }
+// });
 
 app.post('/voluntarios/registro', upload.single('cv'), async (req, res) => {
   const {
