@@ -737,6 +737,75 @@ app.get('/voluntarios/:id/cv', async (req, res) => {
   }
 });
 
+// app.put('/voluntarios/:id', upload.single('cv'), async (req, res) => {
+//   const voluntarioId = req.params.id;
+//   const {
+//     nombre,
+//     apellido_paterno,
+//     apellido_materno,
+//     correo,
+//     celular,
+//     categoria,
+//     grado_instruccion,
+//     area,
+//     rol,
+//     carrera,
+//   } = req.body;
+
+//   const cvFile = req.file ? req.file.path : null;
+
+//   try {
+//     const query = `
+//       UPDATE voluntarios
+//       SET
+//         nombre = $1,
+//         apellido_paterno = $2,
+//         apellido_materno = $3,
+//         correo = $4,
+//         celular = $5,
+//         categoria = $6,
+//         grado_instruccion = $7,
+//         area = $8,
+//         rol = $9,
+//         carrera = $10,
+//         cv = COALESCE($11, cv)
+//       WHERE id = $12
+//       RETURNING *;
+//     `;
+
+//     const values = [
+//       nombre,
+//       apellido_paterno,
+//       apellido_materno,
+//       correo,
+//       celular,
+//       categoria,
+//       grado_instruccion,
+//       area,
+//       rol,
+//       carrera,
+//       cvFile ? await readFileAsync(cvFile) : null,
+//       voluntarioId,
+//     ];
+
+//     const result = await pool.query(query, values);
+
+//     if (result.rows.length === 0) {
+//       return res.status(404).json({ message: 'Voluntario no encontrado.' });
+//     }
+
+//     res.status(200).json({ message: 'Voluntario actualizado correctamente', data: result.rows[0] });
+//   } catch (error) {
+//     console.error('Error al actualizar voluntario:', error);
+//     res.status(500).json({ message: 'Error en el servidor al actualizar el voluntario.' });
+//   }
+// });
+
+
+
+
+
+// Ruta para actualizar voluntarios
 app.put('/voluntarios/:id', upload.single('cv'), async (req, res) => {
   const voluntarioId = req.params.id;
   const {
@@ -750,11 +819,17 @@ app.put('/voluntarios/:id', upload.single('cv'), async (req, res) => {
     area,
     rol,
     carrera,
+    fecha_nacimiento, // 📌 La fecha ya llega en formato correcto desde el frontend
   } = req.body;
 
   const cvFile = req.file ? req.file.path : null;
 
   try {
+    // 📌 Validar que fecha_nacimiento es válida sin transformarla de nuevo
+    let fechaNacimientoSQL = fecha_nacimiento && /^\d{4}-\d{2}-\d{2}$/.test(fecha_nacimiento)
+      ? fecha_nacimiento
+      : null;
+
     const query = `
       UPDATE voluntarios
       SET
@@ -768,8 +843,9 @@ app.put('/voluntarios/:id', upload.single('cv'), async (req, res) => {
         area = $8,
         rol = $9,
         carrera = $10,
-        cv = COALESCE($11, cv)
-      WHERE id = $12
+        fecha_nacimiento = $11,  -- 📌 Se inserta directamente si está en el formato correcto
+        cv = COALESCE($12, cv)
+      WHERE id = $13
       RETURNING *;
     `;
 
@@ -784,6 +860,7 @@ app.put('/voluntarios/:id', upload.single('cv'), async (req, res) => {
       area,
       rol,
       carrera,
+      fechaNacimientoSQL, // 📌 Se usa directamente sin convertirla de nuevo
       cvFile ? await readFileAsync(cvFile) : null,
       voluntarioId,
     ];
@@ -801,7 +878,10 @@ app.put('/voluntarios/:id', upload.single('cv'), async (req, res) => {
   }
 });
 
-// Ruta para actualizar voluntarios
+
+
+
+
 app.put('/voluntarios/:id', async (req, res) => {
   const { id } = req.params;
   const fields = req.body; // Datos enviados en el cuerpo
@@ -836,6 +916,11 @@ app.put('/voluntarios/:id', async (req, res) => {
     res.status(500).json({ message: 'Error al actualizar voluntario' });
   }
 });
+
+
+
+
+
 
 app.put('/voluntarios/:id/estado', async (req, res) => {
   const voluntarioId = req.params.id;
