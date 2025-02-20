@@ -497,7 +497,7 @@ app.get('/voluntarios', async (req, res) => {
      SELECT
         id, dni, nombre, apellido_paterno, apellido_materno, correo,
         ciudad_residencia, celular, grado_instruccion, instagram, facebook, linkedin,
-        fecha_ingreso, fecha_nacimiento, categoria, area, rol, carrera
+        fecha_ingreso, fecha_nacimiento, categoria, area, rol, carrera,estado_voluntario
       FROM voluntarios
     `;
     const result = await pool.query(query);
